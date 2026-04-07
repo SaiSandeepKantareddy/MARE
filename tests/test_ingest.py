@@ -21,6 +21,11 @@ class _FakeReader:
 
 def test_ingest_pdf_writes_page_level_corpus(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ingest_module, "_require_pypdf", lambda: _FakeReader)
+    monkeypatch.setattr(
+        ingest_module,
+        "_render_page_images",
+        lambda pdf_path, image_dir, scale=1.5: [str(image_dir / "page-1.png"), str(image_dir / "page-2.png")],
+    )
 
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_text("placeholder")
@@ -31,5 +36,6 @@ def test_ingest_pdf_writes_page_level_corpus(tmp_path: Path, monkeypatch) -> Non
     assert len(payload["documents"]) == 2
     assert payload["documents"][0]["page"] == 1
     assert payload["documents"][0]["layout_hints"] == "figure abstract"
+    assert payload["documents"][0]["page_image_path"].endswith("page-1.png")
     assert payload["documents"][1]["layout_hints"] == "table"
     assert output_path.exists()

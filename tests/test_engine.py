@@ -42,4 +42,4 @@ def test_text_query_defaults_to_semantic_lookup() -> None:
     explanation = engine.explain("what is positional encoding", top_k=2)
     assert explanation.plan.intent == "semantic_lookup"
     assert explanation.fused_results[0].doc_id == "1"
-
+    assert "positional encoding" in explanation.fused_results[0].snippet.lower()

@@ -32,6 +32,8 @@ class ImageRetriever(BaseRetriever):
                     modality=self.modality,
                     score=score,
                     reason=f"Matched visual cues: {', '.join(sorted(overlap)[:5])}",
+                    snippet=document.image_caption,
+                    page_image_path=document.page_image_path,
                     metadata=document.metadata,
                 )
             )
@@ -59,9 +61,10 @@ class LayoutRetriever(BaseRetriever):
                     modality=self.modality,
                     score=score,
                     reason=f"Matched layout cues: {', '.join(sorted(overlap)[:5])}",
+                    snippet=document.layout_hints,
+                    page_image_path=document.page_image_path,
                     metadata=document.metadata,
                 )
             )
 
         return sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
-

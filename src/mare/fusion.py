@@ -17,7 +17,15 @@ class WeightedScoreFusion:
 
     def fuse(self, results: dict[Modality, list[RetrievalHit]], top_k: int = 5) -> list[RetrievalHit]:
         merged: dict[str, dict[str, object]] = defaultdict(
-            lambda: {"score": 0.0, "title": "", "page": 0, "reasons": [], "metadata": {}}
+            lambda: {
+                "score": 0.0,
+                "title": "",
+                "page": 0,
+                "reasons": [],
+                "snippet": "",
+                "page_image_path": "",
+                "metadata": {},
+            }
         )
 
         for modality, hits in results.items():
@@ -28,6 +36,10 @@ class WeightedScoreFusion:
                 bucket["title"] = hit.title
                 bucket["page"] = hit.page
                 bucket["reasons"].append(f"{modality.value}:{hit.reason}")
+                if not bucket["snippet"] and hit.snippet:
+                    bucket["snippet"] = hit.snippet
+                if not bucket["page_image_path"] and hit.page_image_path:
+                    bucket["page_image_path"] = hit.page_image_path
                 bucket["metadata"] = hit.metadata
 
         fused: list[RetrievalHit] = []
@@ -40,9 +52,10 @@ class WeightedScoreFusion:
                     modality=Modality.TEXT,
                     score=round(float(payload["score"]), 4),
                     reason=" | ".join(payload["reasons"]),
+                    snippet=str(payload["snippet"]),
+                    page_image_path=str(payload["page_image_path"]),
                     metadata=dict(payload["metadata"]),
                 )
             )
 
         return sorted(fused, key=lambda hit: hit.score, reverse=True)[:top_k]
-

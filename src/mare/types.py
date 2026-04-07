@@ -18,6 +18,7 @@ class Document:
     text: str = ""
     image_caption: str = ""
     layout_hints: str = ""
+    page_image_path: str = ""
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -29,6 +30,8 @@ class RetrievalHit:
     modality: Modality
     score: float
     reason: str
+    snippet: str = ""
+    page_image_path: str = ""
     metadata: dict[str, str] = field(default_factory=dict)
 
 

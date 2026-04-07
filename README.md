@@ -63,10 +63,19 @@ tests/
 
 ## Quickstart
 
+Clone and run:
+
 ```bash
-python -m venv .venv
+git clone https://github.com/SaiSandeepKantareddy/MARE.git
+cd MARE
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+```
+
+Then try the sample corpus:
+
+```bash
 mare-demo --query "show me the architecture diagram of transformer"
 ```
 
@@ -75,6 +84,54 @@ Or without installing the package yet:
 ```bash
 PYTHONPATH=src python3 -m mare.demo --query "show me the architecture diagram of transformer"
 ```
+
+## Simplest way to use it
+
+Use one command:
+
+```bash
+python3 ask.py "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf" "partially reinstall the set screws if they fall out"
+```
+
+That will:
+
+- ingest the PDF if needed
+- retrieve the best matching page
+- print the page number
+- print the exact snippet
+- print the rendered page image path
+
+If you want to reuse a previously generated corpus:
+
+```bash
+python3 ask.py --reuse "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf" "partially reinstall the set screws if they fall out"
+```
+
+If the PDF filename is awkward, rename it first:
+
+```bash
+mv ./*.pdf ./manual.pdf
+PYTHONPATH=src python3 ask.py ./manual.pdf "partially reinstall the set screws if they fall out"
+```
+
+## Visual demo
+
+If you want to show this to users visually, run the Streamlit demo:
+
+```bash
+pip install -e ".[ui]"
+PYTHONPATH=src streamlit run src/mare/streamlit_app.py
+```
+
+The demo lets a user:
+
+- upload a PDF
+- ask a question
+- see the best matching page
+- read the exact evidence snippet
+- view the rendered page image
+
+The technical retrieval plan is hidden under a `Debug details` expander so the default experience stays user-facing.
 
 ## Ingest a real PDF
 
@@ -98,12 +155,24 @@ PYTHONPATH=src python3 -m mare.demo --corpus "generated/MacBook Pro (14-inch, M5
 What the ingest step does right now:
 
 - reads each PDF page with `pypdf`
+- renders each PDF page to `generated/<pdf-name>/page-N.png`
 - extracts page text
 - creates one retrieval document per page
 - adds lightweight layout hints when terms like `Table` or `Figure` appear
 - writes a JSON corpus that the retriever can search immediately
 
-This is intentionally a text-first ingest path. Image extraction, OCR, page thumbnails, and real layout modeling are the next step.
+This is still a simple baseline. OCR, figure extraction, and true layout modeling are the next step.
+
+## What you get back
+
+The retriever now returns:
+
+- the matching page number
+- why that page matched
+- a short exact snippet from the page text
+- the rendered page image path
+
+That makes it easier to validate whether retrieval found the right instruction and jump to the exact page image.
 
 Example output:
 

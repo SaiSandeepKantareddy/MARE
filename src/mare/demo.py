@@ -44,6 +44,8 @@ def main() -> None:
                         "page": hit.page,
                         "score": hit.score,
                         "reason": hit.reason,
+                        "snippet": hit.snippet,
+                        "page_image_path": hit.page_image_path,
                     }
                     for hit in explanation.fused_results
                 ],
@@ -55,4 +57,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

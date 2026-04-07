@@ -20,6 +20,16 @@ def _require_pypdf():
     return PdfReader
 
 
+def _require_pdf_renderer():
+    try:
+        import pypdfium2 as pdfium
+    except ImportError as exc:
+        raise RuntimeError(
+            "pypdfium2 is required for page image rendering. Install it with `pip install pypdfium2`."
+        ) from exc
+    return pdfium
+
+
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
@@ -40,11 +50,30 @@ def _infer_layout_hints(text: str) -> str:
     return " ".join(hints)
 
 
+def _render_page_images(pdf_path: Path, image_dir: Path, scale: float = 1.5) -> list[str]:
+    pdfium = _require_pdf_renderer()
+    image_dir.mkdir(parents=True, exist_ok=True)
+    pdf = pdfium.PdfDocument(str(pdf_path))
+    image_paths: list[str] = []
+
+    for page_index in range(len(pdf)):
+        page = pdf[page_index]
+        bitmap = page.render(scale=scale)
+        image = bitmap.to_pil()
+        image_path = image_dir / f"page-{page_index + 1}.png"
+        image.save(image_path)
+        image_paths.append(str(image_path))
+
+    return image_paths
+
+
 def ingest_pdf(pdf_path: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
     PdfReader = _require_pypdf()
     pdf_file = Path(pdf_path)
     reader = PdfReader(str(pdf_file))
     title = pdf_file.stem
+    output = Path(output_path) if output_path is not None else Path("generated") / f"{pdf_file.stem}.json"
+    page_images = _render_page_images(pdf_file, output.with_suffix(""))
     documents: list[Document] = []
 
     for idx, page in enumerate(reader.pages, start=1):
@@ -61,6 +90,7 @@ def ingest_pdf(pdf_path: str | Path, output_path: str | Path | None = None) -> d
                 text=text,
                 image_caption="",
                 layout_hints=_infer_layout_hints(text),
+                page_image_path=page_images[idx - 1] if idx - 1 < len(page_images) else "",
                 metadata={
                     "source": str(pdf_file),
                     "collection": "pdf-ingest",
@@ -78,14 +108,14 @@ def ingest_pdf(pdf_path: str | Path, output_path: str | Path | None = None) -> d
                 "text": doc.text,
                 "image_caption": doc.image_caption,
                 "layout_hints": doc.layout_hints,
+                "page_image_path": doc.page_image_path,
                 "metadata": doc.metadata,
             }
             for doc in documents
         ],
     }
 
-    if output_path is not None:
-        Path(output_path).write_text(json.dumps(payload, indent=2))
+    output.write_text(json.dumps(payload, indent=2))
 
     return payload
 
@@ -111,6 +141,7 @@ def main() -> None:
                 "source_pdf": payload["source_pdf"],
                 "pages_indexed": len(payload["documents"]),
                 "output": str(output),
+                "page_images_dir": str(output.with_suffix("")),
             },
             indent=2,
         )

@@ -12,14 +12,17 @@ license = { text = "MIT" }
 authors = [
   { name = "Saisandeep Kantareddy" }
 ]
-dependencies = ["pypdf>=4.0"]
+dependencies = ["pypdf>=4.0", "pypdfium2>=4.30.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+ui = ["streamlit>=1.12,<2.0", "altair<5"]
 
 [project.scripts]
 mare-demo = "mare.demo:main"
 mare-ingest = "mare.ingest:main"
+mare-ask = "mare.ask:main"
+mare-ui = "mare.streamlit_app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

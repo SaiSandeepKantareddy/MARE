@@ -12,6 +12,35 @@ def _tokenize(value: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", value.lower())
 
 
+def _best_snippet(text: str, query: str, window: int = 220) -> str:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return ""
+
+    query_terms = [term for term in _tokenize(query) if len(term) > 1]
+    if not query_terms:
+        return normalized[:window]
+
+    lowered = normalized.lower()
+    best_index = -1
+    for term in query_terms:
+        found = lowered.find(term)
+        if found != -1:
+            best_index = found if best_index == -1 else min(best_index, found)
+
+    if best_index == -1:
+        return normalized[:window]
+
+    start = max(0, best_index - 60)
+    end = min(len(normalized), start + window)
+    snippet = normalized[start:end].strip()
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(normalized):
+        snippet = snippet + "..."
+    return snippet
+
+
 class TextRetriever(BaseRetriever):
     modality = Modality.TEXT
 
@@ -38,9 +67,10 @@ class TextRetriever(BaseRetriever):
                     modality=self.modality,
                     score=score,
                     reason=f"Matched text terms: {', '.join(sorted(overlap)[:5])}",
+                    snippet=_best_snippet(document.text, query),
+                    page_image_path=document.page_image_path,
                     metadata=document.metadata,
                 )
             )
 
         return sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
-
