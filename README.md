@@ -76,6 +76,35 @@ Or without installing the package yet:
 PYTHONPATH=src python3 -m mare.demo --query "show me the architecture diagram of transformer"
 ```
 
+## Ingest a real PDF
+
+You can convert a PDF into a page-level JSON corpus and then run retrieval on it.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+mare-ingest "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf"
+mare-demo --corpus "generated/MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.json" --query "what does MagSafe 3 refer to"
+```
+
+Without installing the package first:
+
+```bash
+PYTHONPATH=src python3 -m mare.ingest "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf"
+PYTHONPATH=src python3 -m mare.demo --corpus "generated/MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.json" --query "what does MagSafe 3 refer to"
+```
+
+What the ingest step does right now:
+
+- reads each PDF page with `pypdf`
+- extracts page text
+- creates one retrieval document per page
+- adds lightweight layout hints when terms like `Table` or `Figure` appear
+- writes a JSON corpus that the retriever can search immediately
+
+This is intentionally a text-first ingest path. Image extraction, OCR, page thumbnails, and real layout modeling are the next step.
+
 Example output:
 
 ```json
@@ -117,7 +146,7 @@ There is also a local PDF in this workspace:
 
 - `MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf`
 
-That file is not wired into ingestion yet, but it is a good future test asset for page-level parsing once PDF/image extractors are added.
+That file can now be ingested into a JSON page corpus with `mare-ingest`.
 
 ## Roadmap
 

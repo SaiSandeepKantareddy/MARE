@@ -4,4 +4,4 @@ __pycache__/
 dist/
 build/
 *.pyc
-
+generated/
