@@ -1,0 +1,45 @@
+from mare.engine import MAREngine
+from mare.types import Document, Modality
+
+
+def _docs() -> list[Document]:
+    return [
+        Document(
+            doc_id="1",
+            title="Transformer",
+            page=1,
+            text="The transformer uses attention and positional encoding.",
+            image_caption="Architecture diagram with encoder decoder layers.",
+            layout_hints="figure on a two-column page",
+        ),
+        Document(
+            doc_id="2",
+            title="Benchmark",
+            page=2,
+            text="A benchmark compares retrievers using recall and nDCG.",
+            image_caption="Chart with recall results.",
+            layout_hints="table with model comparison",
+        ),
+    ]
+
+
+def test_router_prefers_image_for_visual_query() -> None:
+    engine = MAREngine(_docs())
+    explanation = engine.explain("show me the architecture diagram", top_k=2)
+    assert Modality.IMAGE in explanation.plan.selected_modalities
+    assert explanation.fused_results[0].doc_id == "1"
+
+
+def test_router_prefers_layout_for_table_query() -> None:
+    engine = MAREngine(_docs())
+    explanation = engine.explain("table comparing retrieval models", top_k=2)
+    assert Modality.LAYOUT in explanation.plan.selected_modalities
+    assert explanation.fused_results[0].doc_id == "2"
+
+
+def test_text_query_defaults_to_semantic_lookup() -> None:
+    engine = MAREngine(_docs())
+    explanation = engine.explain("what is positional encoding", top_k=2)
+    assert explanation.plan.intent == "semantic_lookup"
+    assert explanation.fused_results[0].doc_id == "1"
+

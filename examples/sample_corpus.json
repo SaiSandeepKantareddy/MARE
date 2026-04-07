@@ -1,0 +1,41 @@
+{
+  "documents": [
+    {
+      "doc_id": "paper-transformer-p4",
+      "title": "Attention Is All You Need",
+      "page": 4,
+      "text": "The transformer introduces scaled dot-product attention, multi-head attention, and positional encoding for sequence transduction.",
+      "image_caption": "Architecture diagram showing encoder decoder stacks and multi-head attention blocks.",
+      "layout_hints": "two-column page with figure and caption",
+      "metadata": {
+        "source": "demo",
+        "collection": "irpapers-style"
+      }
+    },
+    {
+      "doc_id": "paper-hyde-p3",
+      "title": "Precise Zero-Shot Dense Retrieval without Relevance Labels",
+      "page": 3,
+      "text": "HyDE uses an instruction-following model to generate hypothetical documents and contrastive encoders for retrieval.",
+      "image_caption": "Pipeline figure for hypothetical document generation and retrieval reranking.",
+      "layout_hints": "method section with figure near right column",
+      "metadata": {
+        "source": "demo",
+        "collection": "irpapers-style"
+      }
+    },
+    {
+      "doc_id": "paper-benchmark-p7",
+      "title": "Multimodal Benchmark Comparison",
+      "page": 7,
+      "text": "The benchmark compares BM25, dense retrieval, and multimodal fusion across recall metrics.",
+      "image_caption": "Bar chart comparing recall at one recall at five and recall at twenty.",
+      "layout_hints": "results table spanning both columns with comparison matrix",
+      "metadata": {
+        "source": "demo",
+        "collection": "irpapers-style"
+      }
+    }
+  ]
+}
+
