@@ -4,53 +4,73 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/mare-retrieval.svg)](https://pypi.org/project/mare-retrieval/)
 [![Publish to PyPI](https://github.com/SaiSandeepKantareddy/MARE/actions/workflows/publish.yml/badge.svg)](https://github.com/SaiSandeepKantareddy/MARE/actions/workflows/publish.yml)
 
-MARE is an open-source Python library for evidence-first document retrieval.
+MARE is an open-source Python library for evidence-first PDF retrieval.
 
-It is inspired by the direction highlighted in the IRPAPERS paper, which shows that page-image retrieval and text retrieval have complementary failure modes on scientific documents. Instead of flattening everything into one retrieval path, MARE treats routing, retrieval, fusion, and observability as separate system concerns.
+Given a PDF and a question, MARE is built to return:
 
-## What this repo is
+- the best matching page
+- the exact evidence snippet
+- the rendered page image
+- a highlighted evidence image when the match can be localized
+- retrieval rationale for debugging and trust
 
-- A lightweight Python package between a query and modality-specific indexes
-- A baseline router that decides whether a query should hit text, image, layout, or a hybrid path
-- A late-fusion layer that combines modality-specific scores
-- An explainable debug surface that tells you why a modality was selected
+It started from the broader multimodal retrieval direction highlighted by the IRPAPERS paper, but the current package is intentionally focused on a more concrete and reliable use case: local PDF retrieval with visible evidence.
 
-## What this repo is not
+Paper inspiration: https://arxiv.org/pdf/2602.17687
 
-- Not a chatbot wrapper
-- Not a full PDF parsing stack yet
-- Not a claim that heuristic routing is state of the art
+## What MARE does today
 
-## Why now
+- Ingests PDFs locally into page-level corpora
+- Extracts page text and renders page images
+- Retrieves relevant pages for natural-language questions
+- Returns exact snippets instead of only broad page matches
+- Generates highlighted page images for matched evidence
+- Extracts document objects such as procedures, sections, figures, and tables
+- Supports object-aware retrieval, with the strongest behavior today on procedures and sections
+- Exposes a Python API, CLI tools, and a Streamlit demo
 
-IRPAPERS asks a useful systems question: when should we retrieve over OCR text, page images, layout structure, or some combination? The paper reports that text-based and image-based retrieval each solve queries the other misses, and that fusion improves retrieval quality over either modality alone.
+## What is still early or experimental
 
-This repo turns that observation into an MVP developer layer.
+- Table retrieval
+- Figure retrieval
+- Layout-aware retrieval beyond lightweight heuristics
+- Modality-aware routing as a fully learned system
 
-Paper: https://arxiv.org/pdf/2602.17687
+## Why this exists
 
-## Architecture
+Most "chat with your PDF" systems optimize for a polished answer. MARE is optimized for evidence.
+
+For manuals, support docs, procedures, and technical documentation, users usually want:
+
+- where is this in the document?
+- what exact instruction supports it?
+- can I inspect the page myself?
+
+That is the core product shape of MARE:
+
+```text
+PDF -> retrieval -> exact snippet -> page image -> highlighted evidence
+```
+
+## Current architecture
 
 ```text
 query
-  -> router
-  -> modality-specific retrievers
-     -> text index
-     -> image index
-     -> layout index
-  -> fusion
+  -> page and object retrieval
+  -> scoring and lightweight routing
+  -> best page + best object
+  -> snippet extraction
+  -> page image / highlighted evidence
   -> explainable results
 ```
 
 Current implementation choices:
 
-- Router: keyword heuristic baseline
-- Text retrieval: token-overlap cosine baseline
-- Image retrieval: caption and visual-tag overlap baseline
-- Layout retrieval: layout-hint overlap baseline
-- Fusion: weighted late fusion
-
-The point of `v0.1` is not raw benchmark quality. It is to package the control plane cleanly enough that stronger models can drop in later.
+- Ingestion: `pypdf` + `pypdfium2`
+- Retrieval: lexical and phrase-aware scoring with object boosts
+- Object extraction: procedure, section, figure, and table-like objects
+- Highlighting: render matched text back onto the page image when possible
+- Explainability: reasons, selected object type, and score context
 
 ## Repo layout
 
@@ -102,16 +122,11 @@ print(best.snippet)
 print(best.page_image_path)
 ```
 
-Or try the sample corpus from the CLI:
+Or try it from the CLI after ingesting a real PDF:
 
 ```bash
-mare-demo --query "show me the architecture diagram of transformer"
-```
-
-Or without installing the package yet:
-
-```bash
-PYTHONPATH=src python3 -m mare.demo --query "show me the architecture diagram of transformer"
+mare-ingest "manual.pdf"
+mare-demo --corpus "generated/manual.json" --query "how do I connect the AC adapter"
 ```
 
 ## Simplest way to use it
@@ -162,7 +177,7 @@ Create an app from an existing JSON corpus:
 
 ```python
 app = load_corpus("generated/manual.json")
-results = app.retrieve("show me the comparison table", top_k=3)
+results = app.retrieve("how do I configure wake on lan", top_k=3)
 ```
 
 Core methods:
@@ -198,9 +213,11 @@ The demo lets a user:
 
 - upload a PDF
 - ask a question
-- see the best matching page
+- see the best matching page and object type
 - read the exact evidence snippet
 - view the rendered page image
+- view the highlighted evidence image when available
+- inspect extracted objects on the best page
 
 The technical retrieval plan is hidden under a `Debug details` expander so the default experience stays user-facing.
 
@@ -229,10 +246,10 @@ What the ingest step does right now:
 - renders each PDF page to `generated/<pdf-name>/page-N.png`
 - extracts page text
 - creates one retrieval document per page
-- adds lightweight layout hints when terms like `Table` or `Figure` appear
+- extracts lightweight document objects such as procedures and sections
 - writes a JSON corpus that the retriever can search immediately
 
-This is still a simple baseline. OCR, figure extraction, and true layout modeling are the next step.
+This is still a practical baseline, not a full parsing stack. OCR-heavy documents, richer figure extraction, and stronger layout modeling are next steps.
 
 ## What you get back
 
@@ -243,6 +260,7 @@ The retriever now returns:
 - a short exact snippet from the page text
 - the rendered page image path
 - a highlighted evidence image when text spans can be located on the page
+- the best matching object type when object-aware retrieval is used
 
 That makes it easier to validate whether retrieval found the right instruction and jump to the exact page image.
 
@@ -250,19 +268,21 @@ Example output:
 
 ```json
 {
-  "query": "show me the architecture diagram of transformer",
-  "intent": "visual_lookup",
-  "selected_modalities": ["image"],
-  "discarded_modalities": ["text", "layout"],
-  "confidence": 0.8,
-  "rationale": "Detected modality cues in query tokens. Selected image based on keyword overlap with routing hints.",
+  "query": "how do I connect the AC adapter",
+  "intent": "semantic_lookup",
+  "selected_modalities": ["text"],
+  "discarded_modalities": ["image", "layout"],
+  "confidence": 0.7,
+  "rationale": "Detected modality cues in query tokens. Selected text based on keyword overlap with routing hints.",
   "results": [
     {
-      "doc_id": "paper-transformer-p4",
-      "title": "Attention Is All You Need",
-      "page": 4,
-      "score": 0.6,
-      "reason": "image:Matched visual cues: architecture, diagram, transformer"
+      "doc_id": "manual-p13",
+      "title": "Manual",
+      "page": 13,
+      "score": 1.0,
+      "object_type": "procedure",
+      "reason": "Best object: procedure | phrase match x2",
+      "snippet": "2 Connect the AC adapter to the DC jack of the computer."
     }
   ]
 }
@@ -270,18 +290,18 @@ Example output:
 
 ## Why the explainability matters
 
-The debug surface is a core feature, not an afterthought. For production retrieval systems, we need to answer:
+The debug surface is a core feature, not an afterthought. For retrieval systems that support real work, we need to answer:
 
-- Which modality did the router choose?
-- Which modalities were skipped?
-- Why did a page rank highly?
-- What tradeoff did fusion make?
+- Why did this page rank highly?
+- Which object matched best?
+- Why was a result returned instead of another nearby page?
+- When should the system return no result?
 
-That is the wedge for MARE: make multimodal retrieval inspectable before trying to make it magical.
+That is the wedge for MARE: make retrieval inspectable before trying to make it magical.
 
 ## Local sample data
 
-`examples/sample_corpus.json` contains a tiny IR-paper-style corpus so the routing and fusion path is runnable out of the box.
+`examples/sample_corpus.json` contains a tiny corpus so the retrieval flow is runnable out of the box.
 
 There is also a local PDF in this workspace:
 
@@ -291,33 +311,25 @@ That file can now be ingested into a JSON page corpus with `mare-ingest`.
 
 ## Roadmap
 
-### v0.1
+Near term:
 
-- text + image + layout routing
-- weighted late fusion
-- explainable retrieval output
-- tests and runnable demo
+- better figure extraction
+- stronger table extraction
+- cleaner object segmentation on large manuals
+- better highlighted evidence localization
 
-### v0.2
+Next layer:
 
-- pluggable embedding backends
-- PDF page ingestion
-- OCR and caption extraction adapters
-- score normalization per modality
+- hybrid retrieval backends
+- embedding and reranking adapters
+- LangChain and LlamaIndex integrations
+- agent-friendly interfaces
 
-### v0.3
+Longer term:
 
-- learned router
-- benchmark harness for IRPAPERS-style evaluation
-- cost-aware routing budgets
-- reranking and cross-modal evidence aggregation
-
-## Suggested next open-source moves
-
-- Add adapters for FAISS, Qdrant, and Weaviate
-- Add page extraction from PDFs
-- Add a benchmark runner that computes Recall@k per modality
-- Add a small web debug UI for route inspection
+- richer layout-aware retrieval
+- benchmark harness for evidence-first document retrieval
+- more robust modality-aware routing
 
 ## License
 

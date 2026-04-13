@@ -4,7 +4,7 @@ from setuptools import find_packages, setup
 setup(
     name="mare-retrieval",
     version="0.2.0",
-    description="Modality-Aware Retrieval Engine inspired by IRPAPERS-style multimodal retrieval.",
+    description="Evidence-first PDF retrieval library that returns the best page, exact snippet, and visual evidence for a query.",
     package_dir={"": "src"},
     packages=find_packages("src"),
     python_requires=">=3.9",

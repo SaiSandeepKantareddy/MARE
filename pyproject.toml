@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mare-retrieval"
 version = "0.2.0"
-description = "Modality-Aware Retrieval Engine inspired by IRPAPERS-style multimodal retrieval."
+description = "Evidence-first PDF retrieval library that returns the best page, exact snippet, and visual evidence for a query."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
   { name = "Saisandeep Kantareddy" }
 ]
-keywords = ["retrieval", "rag", "pdf", "document-ai", "multimodal"]
+keywords = ["retrieval", "rag", "pdf", "document-ai", "evidence", "search"]
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
