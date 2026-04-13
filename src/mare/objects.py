@@ -16,16 +16,37 @@ def _split_sentences(text: str) -> list[str]:
     return [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
 
 
+def _find_step_markers(page_text: str) -> list[tuple[int, str]]:
+    markers: list[tuple[int, str]] = []
+
+    # Common manual styles:
+    # "1. Do this"
+    # "1 Do this"
+    # "2 Select Settings ..."
+    patterns = [
+        r"(?:^|\s)(\d{1,2})[.)]\s+",
+        r"(?:^|\s)([1-9])\s+(?=[A-Z])",
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, page_text):
+            markers.append((match.start(1), match.group(1)))
+
+    deduped: dict[int, str] = {}
+    for start, step in sorted(markers, key=lambda item: item[0]):
+        deduped.setdefault(start, step)
+
+    return [(start, step) for start, step in deduped.items()]
+
+
 def _extract_procedures(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
-    matches = list(re.finditer(r"(?:^|\s)(\d+)\.\s+", page_text))
+    matches = _find_step_markers(page_text)
     if not matches:
         return []
 
     objects: list[DocumentObject] = []
-    for idx, match in enumerate(matches):
-        step_no = match.group(1)
-        start = match.start(1)
-        end = matches[idx + 1].start(1) if idx + 1 < len(matches) else len(page_text)
+    for idx, (start, step_no) in enumerate(matches):
+        end = matches[idx + 1][0] if idx + 1 < len(matches) else len(page_text)
         content = _normalize(page_text[start:end])
         if len(content) < 12:
             continue

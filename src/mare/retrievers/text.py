@@ -145,6 +145,23 @@ def _object_bonus(query_tokens: set[str], obj: DocumentObject) -> tuple[float, l
     return bonus, reasons
 
 
+def _best_query_phrase_bonus(query_tokens: list[str], content: str) -> tuple[float, list[str]]:
+    if len(query_tokens) < 2:
+        return 0.0, []
+
+    normalized_content = " ".join(_content_tokens(content))
+    best_len = 0
+    for start in range(len(query_tokens)):
+        for end in range(start + 2, len(query_tokens) + 1):
+            phrase = " ".join(query_tokens[start:end])
+            if phrase and phrase in normalized_content:
+                best_len = max(best_len, end - start)
+
+    if best_len == 0:
+        return 0.0, []
+    return min(0.2, 0.05 * best_len), [f"phrase match x{best_len}"]
+
+
 def _score_object(query_tokens: list[str], obj: DocumentObject) -> tuple[float, list[str], set[str]]:
     content_tokens = _content_tokens(obj.content)
     overlap = set(query_tokens) & set(content_tokens)
@@ -154,8 +171,11 @@ def _score_object(query_tokens: list[str], obj: DocumentObject) -> tuple[float, 
     avg_len = max(len(content_tokens), 1)
     bm25_score = _bm25_score(query_tokens, content_tokens, avg_len)
     bonus, reasons = _object_bonus(set(query_tokens), obj)
-    score = min(1.0, (0.45 * min(1.0, bm25_score / 6.0)) + bonus + (0.08 * len(overlap)))
-    return score, reasons, overlap
+    phrase_bonus, phrase_reasons = _best_query_phrase_bonus(query_tokens, obj.content)
+    density_bonus = min(0.18, len(overlap) / max(len(content_tokens), 1))
+    conciseness_bonus = min(0.12, 12 / max(len(content_tokens), 12))
+    score = min(1.0, (0.35 * min(1.0, bm25_score / 6.0)) + bonus + phrase_bonus + density_bonus + conciseness_bonus)
+    return score, reasons + phrase_reasons, overlap
 
 
 def _best_object(query_tokens: list[str], objects: list[DocumentObject]) -> tuple[DocumentObject | None, float, list[str], set[str]]:
