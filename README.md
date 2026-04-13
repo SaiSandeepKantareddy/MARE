@@ -79,6 +79,12 @@ Or install directly from GitHub:
 pip install "git+https://github.com/SaiSandeepKantareddy/MARE.git"
 ```
 
+The intended package install after PyPI release is:
+
+```bash
+pip install mare
+```
+
 Then use it as a library:
 
 ```python
@@ -163,6 +169,17 @@ Core methods:
 - `app.explain(query)`
 - `app.retrieve(query)`
 - `app.best_match(query)`
+
+## Packaging and release
+
+MARE is now structured as a regular Python package with:
+
+- `pyproject.toml` metadata
+- legacy-friendly `setup.py`
+- console entry points
+- a PyPI publishing workflow
+
+Release notes and PyPI steps live in `PUBLISHING.md`.
 
 ## Visual demo
 
