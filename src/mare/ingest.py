@@ -38,13 +38,13 @@ def _infer_layout_hints(text: str) -> str:
     hints: list[str] = []
     lowered = text.lower()
 
-    if "table" in lowered:
+    if re.search(r"\btable\b", lowered):
         hints.append("table")
-    if "figure" in lowered or "fig." in lowered:
+    if re.search(r"\bfigure\b", lowered) or "fig." in lowered:
         hints.append("figure")
-    if "abstract" in lowered:
+    if re.search(r"\babstract\b", lowered):
         hints.append("abstract")
-    if "references" in lowered:
+    if re.search(r"\breferences\b", lowered):
         hints.append("references")
 
     return " ".join(hints)
@@ -54,15 +54,18 @@ def _infer_page_signals(text: str) -> str:
     lowered = text.lower()
     signals: list[str] = []
 
-    if "table" in lowered:
+    if re.search(r"\btable\b", lowered):
         signals.append("table")
-    if "figure" in lowered or "fig." in lowered or "diagram" in lowered:
+    if re.search(r"\bfigure\b", lowered) or "fig." in lowered or re.search(r"\bdiagram\b", lowered):
         signals.append("figure")
     if re.search(r"(^|\s)\d+\.", lowered):
         signals.append("procedure")
-    if any(term in lowered for term in ("compare", "comparison", "versus", "vs.")):
+    if any(re.search(pattern, lowered) for pattern in (r"\bcompare\b", r"\bcomparison\b", r"\bversus\b", r"\bvs\.\b")):
         signals.append("comparison")
-    if any(term in lowered for term in ("install", "reinstall", "remove", "loosen", "tighten", "use the")):
+    if any(
+        re.search(pattern, lowered)
+        for pattern in (r"\binstall\b", r"\breinstall\b", r"\bremove\b", r"\bloosen\b", r"\btighten\b", r"\buse the\b")
+    ):
         signals.append("instruction")
 
     return " ".join(signals)
