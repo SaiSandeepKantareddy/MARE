@@ -6,7 +6,7 @@ from pathlib import Path
 from mare.demo import load_documents
 from mare.engine import MAREngine
 from mare.ingest import ingest_pdf
-from mare.types import Document, RetrievalExplanation, RetrievalHit
+from mare.types import Document, DocumentObject, RetrievalExplanation, RetrievalHit
 
 
 @dataclass
@@ -55,6 +55,19 @@ class MAREApp:
     def best_match(self, query: str, top_k: int = 3) -> RetrievalHit | None:
         results = self.retrieve(query=query, top_k=top_k)
         return results[0] if results else None
+
+    def get_document(self, doc_id: str) -> Document | None:
+        for document in self.documents:
+            if document.doc_id == doc_id:
+                return document
+        return None
+
+    def get_page_objects(self, doc_id: str, limit: int | None = None) -> list[DocumentObject]:
+        document = self.get_document(doc_id)
+        if not document:
+            return []
+        objects = document.objects
+        return objects[:limit] if limit is not None else objects
 
 
 def load_corpus(corpus_path: str | Path) -> MAREApp:

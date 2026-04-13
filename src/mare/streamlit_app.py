@@ -122,8 +122,27 @@ def _render_object_preview(st, explanation) -> None:
     )
 
 
+def _render_page_objects(st, objects) -> None:
+    if not objects:
+        st.info("No extracted objects were found for this page yet.")
+        return
+
+    st.subheader("Objects On This Page")
+    for obj in objects:
+        st.markdown(
+            f"""
+            <div class="mare-card" style="margin-bottom:0.8rem;">
+              <div class="mare-label">{obj.object_type.value}</div>
+              <div class="mare-value">{obj.object_id.split(':')[-1]}</div>
+              <p class="mare-mini" style="margin-top:0.6rem;">{obj.content}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def _run_query(st, uploaded_pdf, query: str, top_k: int):
-    from mare.ask import ask_pdf
+    from mare import load_pdf
 
     if not query.strip():
         st.warning("Enter a question first.")
@@ -135,13 +154,16 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int):
     pdf_path.write_bytes(uploaded_pdf.getvalue())
 
     with st.spinner("Ingesting PDF and retrieving best pages..."):
-        corpus_path, explanation = ask_pdf(pdf_path=pdf_path, query=query, top_k=top_k, reuse=False)
+        app = load_pdf(pdf_path=pdf_path, reuse=False)
+        corpus_path = app.corpus_path
+        explanation = app.explain(query=query, top_k=top_k)
 
     st.session_state["mare_result"] = {
         "query": query,
         "corpus_path": str(corpus_path),
         "explanation": explanation,
         "filename": uploaded_pdf.name,
+        "app": app,
     }
 
 
@@ -221,6 +243,7 @@ def main() -> None:
         return
 
     best = explanation.fused_results[0]
+    app = result.get("app")
 
     st.markdown(
         f"""
@@ -297,6 +320,9 @@ def main() -> None:
             """,
             unsafe_allow_html=True,
         )
+
+    st.markdown("")
+    _render_page_objects(st, app.get_page_objects(best.doc_id, limit=6) if app else [])
 
     if len(explanation.fused_results) > 1:
         st.subheader("Other Candidate Pages")
