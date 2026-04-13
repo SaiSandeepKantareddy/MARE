@@ -24,6 +24,7 @@ class WeightedScoreFusion:
                 "reasons": [],
                 "snippet": "",
                 "page_image_path": "",
+                "highlight_image_path": "",
                 "metadata": {},
             }
         )
@@ -40,6 +41,8 @@ class WeightedScoreFusion:
                     bucket["snippet"] = hit.snippet
                 if not bucket["page_image_path"] and hit.page_image_path:
                     bucket["page_image_path"] = hit.page_image_path
+                if not bucket["highlight_image_path"] and hit.highlight_image_path:
+                    bucket["highlight_image_path"] = hit.highlight_image_path
                 bucket["metadata"] = hit.metadata
 
         fused: list[RetrievalHit] = []
@@ -54,6 +57,7 @@ class WeightedScoreFusion:
                     reason=" | ".join(payload["reasons"]),
                     snippet=str(payload["snippet"]),
                     page_image_path=str(payload["page_image_path"]),
+                    highlight_image_path=str(payload["highlight_image_path"]),
                     metadata=dict(payload["metadata"]),
                 )
             )

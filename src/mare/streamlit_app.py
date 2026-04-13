@@ -63,10 +63,11 @@ def main() -> None:
             st.write(best.snippet or "[no snippet available]")
 
         with right:
-            st.subheader("Page Image")
-            image_path = Path(best.page_image_path)
-            if best.page_image_path and image_path.exists():
-                st.image(str(image_path), caption=f"Page {best.page}")
+            st.subheader("Evidence Image")
+            image_path = Path(best.highlight_image_path or best.page_image_path)
+            if image_path.exists():
+                caption = f"Highlighted page {best.page}" if best.highlight_image_path else f"Page {best.page}"
+                st.image(str(image_path), caption=caption)
             else:
                 st.warning("No page image available.")
 

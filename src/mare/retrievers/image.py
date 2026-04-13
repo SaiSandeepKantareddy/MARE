@@ -34,6 +34,7 @@ class ImageRetriever(BaseRetriever):
                     reason=f"Matched visual cues: {', '.join(sorted(overlap)[:5])}",
                     snippet=document.image_caption,
                     page_image_path=document.page_image_path,
+                    highlight_image_path=document.page_image_path,
                     metadata=document.metadata,
                 )
             )
@@ -63,6 +64,7 @@ class LayoutRetriever(BaseRetriever):
                     reason=f"Matched layout cues: {', '.join(sorted(overlap)[:5])}",
                     snippet=document.layout_hints,
                     page_image_path=document.page_image_path,
+                    highlight_image_path=document.page_image_path,
                     metadata=document.metadata,
                 )
             )

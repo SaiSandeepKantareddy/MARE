@@ -4,6 +4,7 @@ import math
 import re
 from collections import Counter
 
+from mare.highlight import render_highlighted_page
 from mare.retrievers.base import BaseRetriever
 from mare.types import Modality, RetrievalHit
 
@@ -59,6 +60,7 @@ class TextRetriever(BaseRetriever):
                 sum(v * v for v in doc_counts.values())
             )
             score = numerator / norm if norm else 0.0
+            snippet = _best_snippet(document.text, query)
             hits.append(
                 RetrievalHit(
                     doc_id=document.doc_id,
@@ -67,10 +69,22 @@ class TextRetriever(BaseRetriever):
                     modality=self.modality,
                     score=score,
                     reason=f"Matched text terms: {', '.join(sorted(overlap)[:5])}",
-                    snippet=_best_snippet(document.text, query),
+                    snippet=snippet,
                     page_image_path=document.page_image_path,
                     metadata=document.metadata,
                 )
             )
 
-        return sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
+        top_hits = sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
+        for hit in top_hits:
+            source_pdf = hit.metadata.get("source", "")
+            if source_pdf and hit.page_image_path and hit.snippet:
+                hit.highlight_image_path = render_highlighted_page(
+                    pdf_path=source_pdf,
+                    page_number=hit.page,
+                    page_image_path=hit.page_image_path,
+                    query=query,
+                    snippet=hit.snippet,
+                )
+
+        return top_hits

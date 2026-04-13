@@ -242,6 +242,7 @@ The retriever now returns:
 - why that page matched
 - a short exact snippet from the page text
 - the rendered page image path
+- a highlighted evidence image when text spans can be located on the page
 
 That makes it easier to validate whether retrieval found the right instruction and jump to the exact page image.
 

@@ -40,6 +40,7 @@ def test_print_answer_block_shows_best_hit(capsys) -> None:
     assert "Best Match" in output
     assert "Page: 2" in output
     assert "generated/doc/page-2.png" in output
+    assert "Highlighted image:" in output
 
 
 def test_ask_pdf_reuses_existing_corpus(tmp_path: Path, monkeypatch) -> None:

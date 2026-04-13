@@ -26,6 +26,7 @@ def _print_answer_block(query: str, corpus_path: Path, explanation) -> None:
     print(f"Reason: {best.reason}")
     print(f"Snippet: {best.snippet or '[no snippet available]'}")
     print(f"Image: {best.page_image_path or '[no page image available]'}")
+    print(f"Highlighted image: {best.highlight_image_path or '[no highlight available]'}")
 
 
 def ask_pdf(pdf_path: Path, query: str, top_k: int = 3, reuse: bool = False):

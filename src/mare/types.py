@@ -32,6 +32,7 @@ class RetrievalHit:
     reason: str
     snippet: str = ""
     page_image_path: str = ""
+    highlight_image_path: str = ""
     metadata: dict[str, str] = field(default_factory=dict)
 
 
