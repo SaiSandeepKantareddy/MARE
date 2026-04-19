@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from pathlib import Path
 
-from mare import IdentityReranker, KeywordBoostReranker, MAREApp
-from mare.extensions import MAREConfig, get_parser
+import mare.ingest as ingest_module
+from mare import FastEmbedReranker, IdentityReranker, KeywordBoostReranker, MAREApp
+from mare.extensions import MAREConfig, UnstructuredParser, get_parser
 from mare.retrievers.base import BaseRetriever
 from mare.types import Document, Modality, RetrievalHit
 
@@ -131,3 +134,74 @@ def test_keyword_boost_reranker_prefers_label_overlap() -> None:
     reranked = KeywordBoostReranker().rerank("comparison table", hits, top_k=2)
 
     assert reranked[0].doc_id == "1"
+
+
+def test_unstructured_parser_builds_mare_corpus_with_fake_module(tmp_path: Path, monkeypatch) -> None:
+    class _FakeMetadata:
+        def __init__(self, page_number: int) -> None:
+            self.page_number = page_number
+
+    class _FakeElement:
+        def __init__(self, text: str, category: str, page_number: int) -> None:
+            self.text = text
+            self.category = category
+            self.metadata = _FakeMetadata(page_number)
+
+    def _fake_partition_pdf(filename: str, strategy: str, include_page_breaks: bool):
+        assert strategy == "hi_res"
+        assert include_page_breaks is True
+        return [
+            _FakeElement("Wake on LAN feature", "Title", 1),
+            _FakeElement("Table 1. Settings matrix", "Table", 1),
+            _FakeElement("Architecture diagram", "Image", 2),
+        ]
+
+    fake_pdf_module = types.ModuleType("unstructured.partition.pdf")
+    fake_pdf_module.partition_pdf = _fake_partition_pdf
+    monkeypatch.setitem(sys.modules, "unstructured", types.ModuleType("unstructured"))
+    monkeypatch.setitem(sys.modules, "unstructured.partition", types.ModuleType("unstructured.partition"))
+    monkeypatch.setitem(sys.modules, "unstructured.partition.pdf", fake_pdf_module)
+    monkeypatch.setattr(
+        ingest_module,
+        "_render_page_images",
+        lambda pdf_path, image_dir, scale=1.5: [str(image_dir / "page-1.png"), str(image_dir / "page-2.png")],
+    )
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_text("placeholder")
+    output_path = tmp_path / "sample.json"
+
+    parser = UnstructuredParser()
+    parser.ingest(pdf_path, output_path)
+    payload = json.loads(output_path.read_text())
+
+    assert len(payload["documents"]) == 2
+    assert payload["documents"][0]["metadata"]["parser"] == "unstructured"
+    assert any(obj["object_type"] == "table" for obj in payload["documents"][0]["objects"])
+    assert any(obj["object_type"] == "figure" for obj in payload["documents"][1]["objects"])
+
+
+def test_fastembed_reranker_uses_cross_encoder_scores(monkeypatch) -> None:
+    class _FakeCrossEncoder:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def rerank(self, query: str, documents: list[str]):
+            assert query == "comparison table"
+            return [0.2, 0.9]
+
+    fake_cross_encoder_module = types.ModuleType("fastembed.rerank.cross_encoder")
+    fake_cross_encoder_module.TextCrossEncoder = _FakeCrossEncoder
+    monkeypatch.setitem(sys.modules, "fastembed", types.ModuleType("fastembed"))
+    monkeypatch.setitem(sys.modules, "fastembed.rerank", types.ModuleType("fastembed.rerank"))
+    monkeypatch.setitem(sys.modules, "fastembed.rerank.cross_encoder", fake_cross_encoder_module)
+
+    hits = [
+        RetrievalHit(doc_id="1", title="A", page=1, modality=Modality.TEXT, score=0.1, reason="a", snippet="alpha"),
+        RetrievalHit(doc_id="2", title="B", page=2, modality=Modality.TEXT, score=0.1, reason="b", snippet="beta"),
+    ]
+
+    reranked = FastEmbedReranker().rerank("comparison table", hits, top_k=2)
+
+    assert [hit.doc_id for hit in reranked] == ["2", "1"]
+    assert reranked[0].score == 0.9

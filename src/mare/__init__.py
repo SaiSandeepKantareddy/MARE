@@ -5,6 +5,7 @@ from .engine import MAREngine
 from .extensions import (
     BuiltinPDFParser,
     DoclingParser,
+    FastEmbedReranker,
     IdentityReranker,
     KeywordBoostReranker,
     MAREConfig,
@@ -20,6 +21,7 @@ __all__ = [
     "BuiltinPDFParser",
     "Document",
     "DoclingParser",
+    "FastEmbedReranker",
     "HeuristicModalityRouter",
     "IdentityReranker",
     "KeywordBoostReranker",
