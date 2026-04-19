@@ -6,7 +6,7 @@ import types
 from pathlib import Path
 
 import mare.ingest as ingest_module
-from mare import FastEmbedReranker, IdentityReranker, KeywordBoostReranker, MAREApp
+from mare import FastEmbedReranker, IdentityReranker, KeywordBoostReranker, MAREApp, QdrantHybridRetriever
 from mare.extensions import MAREConfig, UnstructuredParser, get_parser
 from mare.retrievers.base import BaseRetriever
 from mare.types import Document, Modality, RetrievalHit
@@ -205,3 +205,62 @@ def test_fastembed_reranker_uses_cross_encoder_scores(monkeypatch) -> None:
 
     assert [hit.doc_id for hit in reranked] == ["2", "1"]
     assert reranked[0].score == 0.9
+
+
+def test_qdrant_hybrid_retriever_maps_payloads_to_mare_hits(monkeypatch) -> None:
+    class _FakeDocument:
+        def __init__(self, text: str, model: str) -> None:
+            self.text = text
+            self.model = model
+
+    class _FakePoint:
+        def __init__(self, point_id: str, score: float, payload: dict) -> None:
+            self.id = point_id
+            self.score = score
+            self.payload = payload
+
+    class _FakeResponse:
+        def __init__(self, points) -> None:
+            self.points = points
+
+    class _FakeClient:
+        def query_points(self, **kwargs):
+            query = kwargs["query"]
+            assert query.text == "wake on lan"
+            assert kwargs["collection_name"] == "mare-docs"
+            assert kwargs["using"] == "text"
+            return _FakeResponse(
+                [
+                    _FakePoint(
+                        "doc-61",
+                        0.83,
+                        {
+                            "doc_id": "doc-61",
+                            "title": "Manual",
+                            "page": 61,
+                            "snippet": "Wake on LAN feature...",
+                            "page_image_path": "generated/manual/page-61.png",
+                            "object_type": "procedure",
+                            "metadata": {"label": "Wake on LAN"},
+                        },
+                    )
+                ]
+            )
+
+    fake_models = types.SimpleNamespace(Document=_FakeDocument)
+    fake_qdrant = types.ModuleType("qdrant_client")
+    fake_qdrant.models = fake_models
+    monkeypatch.setitem(sys.modules, "qdrant_client", fake_qdrant)
+
+    retriever = QdrantHybridRetriever(
+        [],
+        collection_name="mare-docs",
+        client=_FakeClient(),
+        vector_name="text",
+    )
+    hits = retriever.retrieve("wake on lan", top_k=1)
+
+    assert len(hits) == 1
+    assert hits[0].doc_id == "doc-61"
+    assert hits[0].object_type == "procedure"
+    assert hits[0].metadata["label"] == "Wake on LAN"

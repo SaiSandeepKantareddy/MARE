@@ -244,6 +244,7 @@ Built-in extension helpers:
 - `BuiltinPDFParser` for the default local pipeline
 - `DoclingParser` and `UnstructuredParser` for richer parsing stacks
 - `FastEmbedReranker` for open-source cross-encoder reranking
+- `QdrantHybridRetriever` for vector-backed retrieval on local or remote Qdrant collections
 - `IdentityReranker` as a no-op baseline
 - `KeywordBoostReranker` as a simple built-in reranker example
 
@@ -300,6 +301,34 @@ best = app.best_match("show me the comparison table")
 ```
 
 This keeps the same MARE API while letting developers improve parsing and ranking with open-source components.
+
+Example: keep MARE's app surface, but swap retrieval to Qdrant.
+
+```python
+from mare import MAREApp, MAREConfig, Modality, QdrantHybridRetriever
+
+config = MAREConfig(
+    retriever_factories={
+        Modality.TEXT: lambda documents: QdrantHybridRetriever(
+            documents,
+            collection_name="mare-docs",
+            url="http://localhost:6333",
+            vector_name="text",
+        )
+    }
+)
+
+app = MAREApp.from_corpus("generated/manual.json", config=config)
+best = app.best_match("how do I connect the AC adapter")
+```
+
+Expected Qdrant payload fields:
+
+- `doc_id`
+- `title`
+- `page`
+- `text` or `snippet`
+- optional: `page_image_path`, `highlight_image_path`, `object_id`, `object_type`, `metadata`
 
 ## Packaging and release
 

@@ -231,6 +231,103 @@ class FastEmbedReranker:
         return [hit for _, hit in rescored[:top_k]]
 
 
+class QdrantHybridRetriever(BaseRetriever):
+    """Retriever backed by Qdrant query APIs.
+
+    This is intended for developers who already have a Qdrant collection with
+    payload fields compatible with MARE's result shape.
+    """
+
+    modality = Modality.TEXT
+
+    def __init__(
+        self,
+        documents: list,
+        *,
+        collection_name: str,
+        client=None,
+        url: str | None = None,
+        api_key: str | None = None,
+        location: str | None = None,
+        vector_name: str | None = None,
+        embedding_model: str = "BAAI/bge-small-en-v1.5",
+        payload_text_key: str = "text",
+    ) -> None:
+        super().__init__(documents)
+        self.collection_name = collection_name
+        self.client = client
+        self.url = url
+        self.api_key = api_key
+        self.location = location
+        self.vector_name = vector_name
+        self.embedding_model = embedding_model
+        self.payload_text_key = payload_text_key
+
+    def _get_client(self):
+        if self.client is not None:
+            return self.client
+        try:
+            from qdrant_client import QdrantClient
+        except ImportError as exc:
+            raise RuntimeError(
+                "QdrantHybridRetriever requires `qdrant-client`. Install it with "
+                "`pip install 'mare-retrieval[integrations]'` or `pip install qdrant-client[fastembed]`."
+            ) from exc
+        self.client = QdrantClient(url=self.url, api_key=self.api_key, location=self.location)
+        return self.client
+
+    def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+        client = self._get_client()
+        try:
+            from qdrant_client import models
+        except ImportError as exc:
+            raise RuntimeError(
+                "QdrantHybridRetriever requires `qdrant-client`. Install it with "
+                "`pip install 'mare-retrieval[integrations]'` or `pip install qdrant-client[fastembed]`."
+            ) from exc
+
+        query_document = models.Document(text=query, model=self.embedding_model)
+        query_kwargs = {
+            "collection_name": self.collection_name,
+            "query": query_document,
+            "with_payload": True,
+            "limit": top_k,
+        }
+        if self.vector_name:
+            query_kwargs["using"] = self.vector_name
+
+        response = client.query_points(**query_kwargs)
+        points = getattr(response, "points", response)
+
+        hits: list[RetrievalHit] = []
+        for point in points:
+            payload = getattr(point, "payload", {}) or {}
+            snippet = str(payload.get("snippet") or payload.get(self.payload_text_key) or "")
+            title = str(payload.get("title") or payload.get("doc_id") or "Qdrant result")
+            metadata = dict(payload.get("metadata") or {})
+            if payload.get("label") and "label" not in metadata:
+                metadata["label"] = str(payload["label"])
+
+            hits.append(
+                RetrievalHit(
+                    doc_id=str(payload.get("doc_id") or getattr(point, "id", "")),
+                    title=title,
+                    page=int(payload.get("page") or 0),
+                    modality=self.modality,
+                    score=round(float(getattr(point, "score", 0.0)), 4),
+                    reason=str(payload.get("reason") or f"Qdrant hit from collection '{self.collection_name}'"),
+                    snippet=snippet,
+                    page_image_path=str(payload.get("page_image_path") or ""),
+                    highlight_image_path=str(payload.get("highlight_image_path") or ""),
+                    object_id=str(payload.get("object_id") or ""),
+                    object_type=str(payload.get("object_type") or ""),
+                    metadata=metadata,
+                )
+            )
+
+        return hits
+
+
 _PARSER_REGISTRY: dict[str, DocumentParser] = {
     "builtin": BuiltinPDFParser(),
     "docling": DoclingParser(),
