@@ -243,7 +243,9 @@ Built-in extension helpers:
 
 - `BuiltinPDFParser` for the default local pipeline
 - `DoclingParser` and `UnstructuredParser` for richer parsing stacks
+- `SentenceTransformersRetriever` for drop-in semantic retrieval with Hugging Face models
 - `FastEmbedReranker` for open-source cross-encoder reranking
+- `QdrantIndexer` for indexing MARE documents into a local or remote Qdrant collection
 - `QdrantHybridRetriever` for vector-backed retrieval on local or remote Qdrant collections
 - `IdentityReranker` as a no-op baseline
 - `KeywordBoostReranker` as a simple built-in reranker example
@@ -263,6 +265,7 @@ Install optional integrations when you need them:
 
 ```bash
 pip install "mare-retrieval[docling]"
+pip install "mare-retrieval[sentence-transformers]"
 pip install "mare-retrieval[unstructured]"
 pip install "mare-retrieval[fastembed]"
 pip install "mare-retrieval[integrations]"
@@ -275,9 +278,9 @@ On a small local machine, you can use MARE with the built-in parser and retrieve
 On a bigger machine or inside a production stack, you can upgrade pieces independently:
 
 - swap the parser for `Docling` or `Unstructured`
-- swap the text retriever for an embedding-backed retriever
+- swap the text retriever for an embedding-backed retriever such as `SentenceTransformersRetriever`
 - add a cross-encoder reranker
-- later plug in a vector backend like `Qdrant`
+- later plug in a vector backend like `Qdrant` and use `QdrantIndexer` to populate it
 
 That is the intended habit MARE should create:
 
@@ -302,6 +305,26 @@ best = app.best_match("show me the comparison table")
 ```
 
 This keeps the same MARE API while letting developers improve parsing and ranking with open-source components.
+
+Example: use a sentence-transformers semantic retriever without changing the app API.
+
+```python
+from mare import MAREApp, MAREConfig, Modality, SentenceTransformersRetriever
+
+config = MAREConfig(
+    retriever_factories={
+        Modality.TEXT: lambda documents: SentenceTransformersRetriever(
+            documents,
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+        )
+    }
+)
+
+app = MAREApp.from_corpus("generated/manual.json", config=config)
+best = app.best_match("how do I connect the AC adapter")
+```
+
+This is a good default upgrade path when you want stronger semantic matching with widely used open-source models from the Hugging Face ecosystem.
 
 Example: use Docling for richer document parsing.
 
@@ -345,6 +368,23 @@ Expected Qdrant payload fields:
 - `page`
 - `text` or `snippet`
 - optional: `page_image_path`, `highlight_image_path`, `object_id`, `object_type`, `metadata`
+
+Example: index a MARE corpus into Qdrant before using the hybrid retriever.
+
+```python
+from mare import QdrantIndexer, load_corpus
+
+documents = load_corpus("generated/manual.json")
+
+indexer = QdrantIndexer(
+    collection_name="mare-docs",
+    url="http://localhost:6333",
+    vector_name="text",
+)
+indexer.index_documents(documents, recreate=True)
+```
+
+By default, `QdrantIndexer` uses a sentence-transformers embedder. Developers can swap in their own embedder callable if they already have a preferred model or service.
 
 A complete advanced-stack example is available in:
 

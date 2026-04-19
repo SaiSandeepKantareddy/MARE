@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
@@ -28,6 +29,41 @@ class ResultReranker(Protocol):
 RetrieverFactory = Callable[[list], BaseRetriever]
 
 
+def _to_vector_list(vector) -> list[float]:
+    if hasattr(vector, "tolist"):
+        values = vector.tolist()
+        if isinstance(values, list):
+            return [float(item) for item in values]
+    return [float(item) for item in vector]
+
+
+def _cosine_similarity(left, right) -> float:
+    left_vec = _to_vector_list(left)
+    right_vec = _to_vector_list(right)
+    if not left_vec or not right_vec or len(left_vec) != len(right_vec):
+        return 0.0
+    numerator = sum(a * b for a, b in zip(left_vec, right_vec))
+    left_norm = math.sqrt(sum(a * a for a in left_vec))
+    right_norm = math.sqrt(sum(b * b for b in right_vec))
+    if not left_norm or not right_norm:
+        return 0.0
+    return numerator / (left_norm * right_norm)
+
+
+def _encode_with_fallback(model, texts):
+    call_variants = [
+        {"convert_to_numpy": True, "normalize_embeddings": True},
+        {"convert_to_numpy": True},
+        {},
+    ]
+    for kwargs in call_variants:
+        try:
+            return model.encode(texts, **kwargs)
+        except TypeError:
+            continue
+    return model.encode(texts)
+
+
 @dataclass
 class MAREConfig:
     parser: str | DocumentParser | None = None
@@ -41,6 +77,66 @@ class BuiltinPDFParser:
     def ingest(self, pdf_path: Path, output_path: Path) -> Path:
         ingest_pdf(pdf_path=pdf_path, output_path=output_path)
         return output_path
+
+
+class SentenceTransformersRetriever(BaseRetriever):
+    """Semantic retriever backed by `sentence-transformers`."""
+
+    modality = Modality.TEXT
+
+    def __init__(self, documents: list, model_name: str = "sentence-transformers/all-MiniLM-L6-v2", model=None) -> None:
+        super().__init__(documents)
+        self.model_name = model_name
+        self.model = model
+        self._doc_embeddings = None
+
+    def _get_model(self):
+        if self.model is not None:
+            return self.model
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise RuntimeError(
+                "SentenceTransformersRetriever requires `sentence-transformers`. Install it with "
+                "`pip install 'mare-retrieval[sentence-transformers]'` or `pip install sentence-transformers`."
+            ) from exc
+        self.model = SentenceTransformer(self.model_name)
+        return self.model
+
+    def _get_doc_embeddings(self):
+        if self._doc_embeddings is not None:
+            return self._doc_embeddings
+        model = self._get_model()
+        texts = [document.text or document.title for document in self.documents]
+        self._doc_embeddings = list(_encode_with_fallback(model, texts))
+        return self._doc_embeddings
+
+    def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+        from mare.retrievers.text import _best_snippet
+
+        model = self._get_model()
+        query_embedding = list(_encode_with_fallback(model, [query]))[0]
+        hits: list[RetrievalHit] = []
+
+        for document, embedding in zip(self.documents, self._get_doc_embeddings()):
+            score = round(_cosine_similarity(query_embedding, embedding), 4)
+            if score <= 0:
+                continue
+            hits.append(
+                RetrievalHit(
+                    doc_id=document.doc_id,
+                    title=document.title,
+                    page=document.page,
+                    modality=self.modality,
+                    score=score,
+                    reason=f"sentence-transformers semantic match via {self.model_name}",
+                    snippet=_best_snippet(document.text or document.title, query),
+                    page_image_path=document.page_image_path,
+                    metadata=dict(document.metadata),
+                )
+            )
+
+        return sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
 
 
 class DoclingParser:
@@ -414,6 +510,101 @@ class QdrantHybridRetriever(BaseRetriever):
             )
 
         return hits
+
+
+class QdrantIndexer:
+    """Helper for indexing MARE documents into Qdrant."""
+
+    def __init__(
+        self,
+        collection_name: str,
+        *,
+        client=None,
+        url: str | None = None,
+        api_key: str | None = None,
+        location: str | None = None,
+        vector_name: str | None = "text",
+        embedder=None,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    ) -> None:
+        self.collection_name = collection_name
+        self.client = client
+        self.url = url
+        self.api_key = api_key
+        self.location = location
+        self.vector_name = vector_name
+        self.embedder = embedder
+        self.model_name = model_name
+
+    def _get_client_and_models(self):
+        try:
+            from qdrant_client import QdrantClient, models
+        except ImportError as exc:
+            raise RuntimeError(
+                "QdrantIndexer requires `qdrant-client`. Install it with "
+                "`pip install 'mare-retrieval[integrations]'` or `pip install qdrant-client[fastembed]`."
+            ) from exc
+        if self.client is None:
+            self.client = QdrantClient(url=self.url, api_key=self.api_key, location=self.location)
+        return self.client, models
+
+    def _get_embedder(self):
+        if self.embedder is not None:
+            return self.embedder
+        retriever = SentenceTransformersRetriever([], model_name=self.model_name)
+        model = retriever._get_model()
+        return lambda texts: list(_encode_with_fallback(model, texts))
+
+    def _payload_for_document(self, document) -> dict:
+        snippet = (document.text or "")[:240]
+        return {
+            "doc_id": document.doc_id,
+            "title": document.title,
+            "page": document.page,
+            "text": document.text,
+            "snippet": snippet,
+            "page_image_path": document.page_image_path,
+            "metadata": document.metadata,
+        }
+
+    def index_documents(self, documents: list, recreate: bool = False) -> int:
+        if not documents:
+            return 0
+
+        client, models = self._get_client_and_models()
+        embedder = self._get_embedder()
+        texts = [document.text or document.title for document in documents]
+        vectors = list(embedder(texts))
+        first_vector = _to_vector_list(vectors[0])
+        vector_size = len(first_vector)
+
+        vector_config = models.VectorParams(size=vector_size, distance=models.Distance.COSINE)
+        collection_exists = getattr(client, "collection_exists", None)
+        exists = collection_exists(self.collection_name) if callable(collection_exists) else False
+
+        if recreate and hasattr(client, "delete_collection") and exists:
+            client.delete_collection(self.collection_name)
+            exists = False
+
+        if not exists:
+            create_kwargs = {"collection_name": self.collection_name}
+            if self.vector_name:
+                create_kwargs["vectors_config"] = {self.vector_name: vector_config}
+            else:
+                create_kwargs["vectors_config"] = vector_config
+            client.create_collection(**create_kwargs)
+
+        points = []
+        for index, (document, vector) in enumerate(zip(documents, vectors), start=1):
+            payload = self._payload_for_document(document)
+            point_id = document.doc_id or str(index)
+            vector_payload = _to_vector_list(vector)
+            if self.vector_name:
+                vector_payload = {self.vector_name: vector_payload}
+            points.append(models.PointStruct(id=point_id, vector=vector_payload, payload=payload))
+
+        client.upsert(collection_name=self.collection_name, points=points)
+        return len(points)
 
 
 _PARSER_REGISTRY: dict[str, DocumentParser] = {

@@ -21,9 +21,11 @@ setup(
         "dev": ["pytest>=8.0"],
         "ui": ["streamlit>=1.12,<2.0", "altair<5"],
         "docling": ["docling>=2.70.0; python_version >= '3.10'"],
+        "sentence-transformers": ["sentence-transformers>=3.0.0"],
         "fastembed": ["fastembed>=0.7.0"],
         "unstructured": ["unstructured[pdf]>=0.16.0"],
         "integrations": [
+            "sentence-transformers>=3.0.0",
             "fastembed>=0.7.0",
             "qdrant-client[fastembed]>=1.14.1",
             "unstructured[pdf]>=0.16.0",

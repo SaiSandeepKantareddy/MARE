@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 import types
 from pathlib import Path
 
 import mare.ingest as ingest_module
-from mare import FastEmbedReranker, IdentityReranker, KeywordBoostReranker, MAREApp, QdrantHybridRetriever
+from mare import (
+    FastEmbedReranker,
+    IdentityReranker,
+    KeywordBoostReranker,
+    MAREApp,
+    QdrantHybridRetriever,
+    QdrantIndexer,
+    SentenceTransformersRetriever,
+)
 from mare.extensions import DoclingParser, MAREConfig, UnstructuredParser, get_parser
 from mare.retrievers.base import BaseRetriever
 from mare.types import Document, Modality, RetrievalHit
@@ -312,3 +321,113 @@ def test_qdrant_hybrid_retriever_maps_payloads_to_mare_hits(monkeypatch) -> None
     assert hits[0].doc_id == "doc-61"
     assert hits[0].object_type == "procedure"
     assert hits[0].metadata["label"] == "Wake on LAN"
+
+
+def test_sentence_transformers_retriever_uses_semantic_similarity(monkeypatch) -> None:
+    class _FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def encode(self, texts, **kwargs):
+            vectors = []
+            for text in texts:
+                normalized = text.lower()
+                if "adapter" in normalized:
+                    vectors.append([1.0, 0.0])
+                elif "wake on lan" in normalized:
+                    vectors.append([0.0, 1.0])
+                else:
+                    vectors.append([0.5, 0.5])
+            return vectors
+
+    fake_st_module = types.ModuleType("sentence_transformers")
+    fake_st_module.SentenceTransformer = _FakeSentenceTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st_module)
+
+    documents = [
+        Document(doc_id="doc-1", title="Manual", page=10, text="Connect the AC adapter to the laptop."),
+        Document(doc_id="doc-2", title="Manual", page=61, text="Wake on LAN feature setup instructions."),
+    ]
+
+    retriever = SentenceTransformersRetriever(documents)
+    hits = retriever.retrieve("how do I connect the adapter", top_k=2)
+
+    assert len(hits) == 1
+    assert hits[0].doc_id == "doc-1"
+    assert "sentence-transformers semantic match" in hits[0].reason
+    assert math.isclose(hits[0].score, 1.0, rel_tol=0.0, abs_tol=1e-6)
+
+
+def test_qdrant_indexer_builds_collection_and_upserts_points(monkeypatch) -> None:
+    class _FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def encode(self, texts, **kwargs):
+            return [[float(index + 1), float(index + 2)] for index, _ in enumerate(texts)]
+
+    class _FakeVectorParams:
+        def __init__(self, size: int, distance) -> None:
+            self.size = size
+            self.distance = distance
+
+    class _FakePointStruct:
+        def __init__(self, id, vector, payload) -> None:
+            self.id = id
+            self.vector = vector
+            self.payload = payload
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.created = None
+            self.deleted = []
+            self.upserts = []
+            self.exists = False
+
+        def collection_exists(self, name: str) -> bool:
+            return self.exists
+
+        def delete_collection(self, name: str) -> None:
+            self.deleted.append(name)
+            self.exists = False
+
+        def create_collection(self, **kwargs) -> None:
+            self.created = kwargs
+            self.exists = True
+
+        def upsert(self, collection_name: str, points) -> None:
+            self.upserts.append((collection_name, points))
+
+    fake_st_module = types.ModuleType("sentence_transformers")
+    fake_st_module.SentenceTransformer = _FakeSentenceTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st_module)
+
+    fake_models = types.SimpleNamespace(
+        VectorParams=_FakeVectorParams,
+        PointStruct=_FakePointStruct,
+        Distance=types.SimpleNamespace(COSINE="cosine"),
+    )
+    fake_qdrant = types.ModuleType("qdrant_client")
+    fake_qdrant.models = fake_models
+    fake_qdrant.QdrantClient = _FakeClient
+    monkeypatch.setitem(sys.modules, "qdrant_client", fake_qdrant)
+
+    client = _FakeClient()
+    documents = [
+        Document(doc_id="doc-1", title="Manual", page=1, text="Connect the AC adapter.", metadata={"section": "power"}),
+        Document(doc_id="doc-2", title="Manual", page=2, text="Wake on LAN feature.", metadata={"section": "network"}),
+    ]
+
+    indexer = QdrantIndexer(collection_name="mare-docs", client=client, vector_name="text")
+    indexed = indexer.index_documents(documents, recreate=True)
+
+    assert indexed == 2
+    assert client.created["collection_name"] == "mare-docs"
+    assert "text" in client.created["vectors_config"]
+    assert len(client.upserts) == 1
+    collection_name, points = client.upserts[0]
+    assert collection_name == "mare-docs"
+    assert len(points) == 2
+    assert points[0].id == "doc-1"
+    assert points[0].vector == {"text": [1.0, 2.0]}
+    assert points[0].payload["metadata"]["section"] == "power"
