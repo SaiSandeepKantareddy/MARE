@@ -44,17 +44,105 @@ class BuiltinPDFParser:
 
 
 class DoclingParser:
-    """Placeholder adapter for Docling-backed parsing.
-
-    This keeps MARE's parser interface stable while letting developers wire in
-    richer OCR/layout/table extraction when Docling is available in their env.
-    """
+    """Parser adapter backed by Docling's document conversion pipeline."""
 
     def ingest(self, pdf_path: Path, output_path: Path) -> Path:
-        raise RuntimeError(
-            "DoclingParser is an integration stub. Install/configure Docling in your environment and "
-            "implement this adapter to emit a MARE-compatible corpus."
-        )
+        try:
+            from docling.document_converter import DocumentConverter
+        except ImportError as exc:
+            raise RuntimeError(
+                "DoclingParser requires Docling. Install it with "
+                "`pip install 'mare-retrieval[docling]'` or `pip install docling`."
+            ) from exc
+
+        from mare.ingest import _infer_layout_hints, _infer_page_signals, _normalize_text, _render_page_images
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        page_images = _render_page_images(pdf_path, output_path.with_suffix(""))
+        converter = DocumentConverter()
+        result = converter.convert(str(pdf_path))
+        page_entries = self._extract_page_entries(result)
+
+        payload_documents = []
+        max_page = max(len(page_images), max((page_no for page_no, _ in page_entries), default=0))
+        for page_number in range(1, max_page + 1):
+            raw_text = next((text for page_no, text in page_entries if page_no == page_number), "").strip()
+            text = _normalize_text(raw_text) if raw_text else f"[No extractable text found on page {page_number}]"
+            doc_id = f"{pdf_path.stem.lower().replace(' ', '-')}-p{page_number}"
+            objects = extract_document_objects(raw_text or text, doc_id, page_number)
+
+            metadata = {
+                "source": str(pdf_path),
+                "collection": "docling-ingest",
+                "signals": _infer_page_signals(text),
+                "parser": "docling",
+            }
+            confidence = getattr(result, "confidence", None)
+            if confidence is not None:
+                metadata["confidence"] = str(confidence)
+
+            payload_documents.append(
+                {
+                    "doc_id": doc_id,
+                    "title": pdf_path.stem,
+                    "page": page_number,
+                    "text": text,
+                    "image_caption": "",
+                    "layout_hints": _infer_layout_hints(text),
+                    "page_image_path": page_images[page_number - 1] if page_number - 1 < len(page_images) else "",
+                    "objects": [
+                        {
+                            "object_id": obj.object_id,
+                            "doc_id": obj.doc_id,
+                            "page": obj.page,
+                            "object_type": obj.object_type.value,
+                            "content": obj.content,
+                            "metadata": obj.metadata,
+                        }
+                        for obj in objects
+                    ],
+                    "metadata": metadata,
+                }
+            )
+
+        output_path.write_text(json.dumps({"source_pdf": str(pdf_path), "documents": payload_documents}, indent=2))
+        return output_path
+
+    @staticmethod
+    def _extract_page_entries(result) -> list[tuple[int, str]]:
+        pages = getattr(result, "pages", None) or []
+        extracted: list[tuple[int, str]] = []
+
+        for index, page in enumerate(pages, start=1):
+            page_no = getattr(page, "page_no", None) or getattr(page, "page_number", None) or index
+            page_text = ""
+            for candidate in ("assembled", "text", "content", "markdown"):
+                value = getattr(page, candidate, None)
+                if isinstance(value, str) and value.strip():
+                    page_text = value
+                    break
+            if not page_text and isinstance(page, dict):
+                for candidate in ("assembled", "text", "content", "markdown"):
+                    value = page.get(candidate)
+                    if isinstance(value, str) and value.strip():
+                        page_text = value
+                        break
+                page_no = int(page.get("page_no") or page.get("page_number") or page_no)
+            if page_text:
+                extracted.append((int(page_no), page_text))
+
+        if extracted:
+            return extracted
+
+        document = getattr(result, "document", None)
+        if document is not None:
+            export_markdown = getattr(document, "export_to_markdown", None)
+            if callable(export_markdown):
+                markdown = export_markdown()
+                if markdown and markdown.strip():
+                    return [(1, markdown)]
+
+        return []
 
 
 class UnstructuredParser:

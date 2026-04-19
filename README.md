@@ -262,6 +262,7 @@ MARE's job is to provide the retrieval framework and evidence-first UX. Better m
 Install optional integrations when you need them:
 
 ```bash
+pip install "mare-retrieval[docling]"
 pip install "mare-retrieval[unstructured]"
 pip install "mare-retrieval[fastembed]"
 pip install "mare-retrieval[integrations]"
@@ -301,6 +302,21 @@ best = app.best_match("show me the comparison table")
 ```
 
 This keeps the same MARE API while letting developers improve parsing and ranking with open-source components.
+
+Example: use Docling for richer document parsing.
+
+```python
+from mare import DoclingParser, MAREApp
+
+app = MAREApp.from_pdf(
+    "manual.pdf",
+    parser=DoclingParser(),
+)
+
+best = app.best_match("how do I configure wake on lan")
+```
+
+Docling is especially promising when you want stronger OCR, layout, and table/figure extraction while still keeping the MARE API unchanged.
 
 Example: keep MARE's app surface, but swap retrieval to Qdrant.
 

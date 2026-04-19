@@ -7,7 +7,7 @@ from pathlib import Path
 
 import mare.ingest as ingest_module
 from mare import FastEmbedReranker, IdentityReranker, KeywordBoostReranker, MAREApp, QdrantHybridRetriever
-from mare.extensions import MAREConfig, UnstructuredParser, get_parser
+from mare.extensions import DoclingParser, MAREConfig, UnstructuredParser, get_parser
 from mare.retrievers.base import BaseRetriever
 from mare.types import Document, Modality, RetrievalHit
 
@@ -179,6 +179,54 @@ def test_unstructured_parser_builds_mare_corpus_with_fake_module(tmp_path: Path,
     assert payload["documents"][0]["metadata"]["parser"] == "unstructured"
     assert any(obj["object_type"] == "table" for obj in payload["documents"][0]["objects"])
     assert any(obj["object_type"] == "figure" for obj in payload["documents"][1]["objects"])
+
+
+def test_docling_parser_builds_mare_corpus_with_fake_module(tmp_path: Path, monkeypatch) -> None:
+    class _FakePage:
+        def __init__(self, page_no: int, assembled: str) -> None:
+            self.page_no = page_no
+            self.assembled = assembled
+
+    class _FakeDocument:
+        def export_to_markdown(self) -> str:
+            return "# Fallback markdown"
+
+    class _FakeResult:
+        def __init__(self) -> None:
+            self.pages = [
+                _FakePage(1, "Wake on LAN feature"),
+                _FakePage(2, "Table 1. Settings matrix"),
+            ]
+            self.document = _FakeDocument()
+            self.confidence = 0.91
+
+    class _FakeDocumentConverter:
+        def convert(self, source: str):
+            assert source.endswith("sample.pdf")
+            return _FakeResult()
+
+    fake_docling_converter = types.ModuleType("docling.document_converter")
+    fake_docling_converter.DocumentConverter = _FakeDocumentConverter
+    monkeypatch.setitem(sys.modules, "docling", types.ModuleType("docling"))
+    monkeypatch.setitem(sys.modules, "docling.document_converter", fake_docling_converter)
+    monkeypatch.setattr(
+        ingest_module,
+        "_render_page_images",
+        lambda pdf_path, image_dir, scale=1.5: [str(image_dir / "page-1.png"), str(image_dir / "page-2.png")],
+    )
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_text("placeholder")
+    output_path = tmp_path / "sample.json"
+
+    parser = DoclingParser()
+    parser.ingest(pdf_path, output_path)
+    payload = json.loads(output_path.read_text())
+
+    assert len(payload["documents"]) == 2
+    assert payload["documents"][0]["metadata"]["parser"] == "docling"
+    assert payload["documents"][0]["metadata"]["confidence"] == "0.91"
+    assert payload["documents"][1]["text"].startswith("Table 1")
 
 
 def test_fastembed_reranker_uses_cross_encoder_scores(monkeypatch) -> None:
