@@ -76,6 +76,16 @@ class MAREApp:
         objects = document.objects
         return objects[:limit] if limit is not None else objects
 
+    def as_langchain_retriever(self, top_k: int = 3):
+        from mare.integrations import create_langchain_retriever
+
+        return create_langchain_retriever(self, top_k=top_k)
+
+    def as_llamaindex_retriever(self, top_k: int = 3):
+        from mare.integrations import create_llamaindex_retriever
+
+        return create_llamaindex_retriever(self, top_k=top_k)
+
 
 def load_corpus(corpus_path: str | Path, config: MAREConfig | None = None) -> MAREApp:
     return MAREApp.from_corpus(corpus_path, config=config)

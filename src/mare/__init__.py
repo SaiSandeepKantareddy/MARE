@@ -17,15 +17,25 @@ from .extensions import (
     register_parser,
 )
 from .fusion import WeightedScoreFusion
+from .integrations import (
+    create_langchain_retriever,
+    create_llamaindex_retriever,
+    hit_to_langchain_document,
+    hit_to_llamaindex_node,
+)
 from .router import HeuristicModalityRouter
 from .types import Document, Modality, QueryPlan, RetrievalExplanation, RetrievalHit
 
 __all__ = [
     "BuiltinPDFParser",
+    "create_langchain_retriever",
+    "create_llamaindex_retriever",
     "Document",
     "DoclingParser",
     "FastEmbedReranker",
     "HeuristicModalityRouter",
+    "hit_to_langchain_document",
+    "hit_to_llamaindex_node",
     "IdentityReranker",
     "KeywordBoostReranker",
     "get_parser",

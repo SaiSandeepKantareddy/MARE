@@ -243,6 +243,7 @@ Built-in extension helpers:
 
 - `BuiltinPDFParser` for the default local pipeline
 - `DoclingParser` and `UnstructuredParser` for richer parsing stacks
+- `LangChain` and `LlamaIndex` adapters for ecosystem-friendly retrieval
 - `SentenceTransformersRetriever` for drop-in semantic retrieval with Hugging Face models
 - `FastEmbedReranker` for open-source cross-encoder reranking
 - `QdrantIndexer` for indexing MARE documents into a local or remote Qdrant collection
@@ -265,6 +266,8 @@ Install optional integrations when you need them:
 
 ```bash
 pip install "mare-retrieval[docling]"
+pip install "mare-retrieval[langchain]"
+pip install "mare-retrieval[llamaindex]"
 pip install "mare-retrieval[sentence-transformers]"
 pip install "mare-retrieval[unstructured]"
 pip install "mare-retrieval[fastembed]"
@@ -325,6 +328,33 @@ best = app.best_match("how do I connect the AC adapter")
 ```
 
 This is a good default upgrade path when you want stronger semantic matching with widely used open-source models from the Hugging Face ecosystem.
+
+Example: plug MARE into LangChain or LangGraph as a retriever.
+
+```python
+from mare import MAREApp
+
+app = MAREApp.from_corpus("generated/manual.json")
+retriever = app.as_langchain_retriever(top_k=3)
+
+docs = retriever.invoke("how do I configure wake on lan")
+```
+
+Each returned LangChain document includes the usual page content plus MARE metadata like `page`, `score`, `object_type`, `page_image_path`, and `highlight_image_path`.
+
+Example: plug MARE into LlamaIndex as a retriever.
+
+```python
+from llama_index.core.schema import QueryBundle
+from mare import MAREApp
+
+app = MAREApp.from_corpus("generated/manual.json")
+retriever = app.as_llamaindex_retriever(top_k=3)
+
+nodes = retriever.retrieve(QueryBundle("how do I connect the AC adapter"))
+```
+
+This gives you `NodeWithScore` results built from MARE evidence hits, so the surrounding LlamaIndex workflow can keep using its native abstractions.
 
 Example: use Docling for richer document parsing.
 
