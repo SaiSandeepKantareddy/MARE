@@ -420,6 +420,38 @@ A complete advanced-stack example is available in:
 
 - `examples/advanced_stack.py`
 
+It supports combinations like:
+
+- built-in / Docling / Unstructured parsing
+- sentence-transformers semantic retrieval
+- Qdrant indexing plus Qdrant-backed retrieval
+- FastEmbed reranking
+- LangChain document output
+- LlamaIndex node output
+
+Example:
+
+```bash
+PYTHONPATH=src python3 examples/advanced_stack.py \
+  --corpus generated/manual.json \
+  --query "how do I configure wake on lan" \
+  --semantic \
+  --reranker fastembed
+```
+
+Or, if you want a more production-like path:
+
+```bash
+PYTHONPATH=src python3 examples/advanced_stack.py \
+  --pdf manual.pdf \
+  --parser docling \
+  --query "show me the comparison table" \
+  --qdrant-url http://localhost:6333 \
+  --qdrant-collection mare-docs \
+  --index-qdrant \
+  --use-qdrant
+```
+
 ## Packaging and release
 
 MARE is now structured as a regular Python package with:
