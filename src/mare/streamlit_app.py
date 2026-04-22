@@ -614,7 +614,7 @@ def main() -> None:
         image_path = Path(best.highlight_image_path or best.page_image_path)
         if image_path.exists():
             caption = f"Highlighted page {best.page}" if best.highlight_image_path else f"Page {best.page}"
-            st.image(str(image_path), caption=caption, use_column_width=True)
+            st.image(str(image_path), caption=caption, width="stretch")
         else:
             st.warning("No page image available.")
 

@@ -110,6 +110,8 @@ The intended package install after PyPI release is:
 pip install mare-retrieval
 ```
 
+That base install is intentionally lightweight. Optional stacks such as Streamlit, sentence-transformers, FAISS, LangChain, OCR parsers, and other advanced integrations are installed through extras.
+
 Then use it as a library:
 
 ```python
@@ -282,6 +284,51 @@ pip install "mare-retrieval[surya]"
 pip install "mare-retrieval[unstructured]"
 pip install "mare-retrieval[fastembed]"
 pip install "mare-retrieval[integrations]"
+```
+
+### New-user install advice
+
+If you want the smoothest first experience, install in layers instead of trying to pull every optional dependency at once.
+
+Good path:
+
+1. Core visual playground
+
+```bash
+pip install -e ".[ui]"
+```
+
+2. Advanced retrieval stack
+
+```bash
+pip install -e ".[sentence-transformers,faiss,langchain,langgraph,llamaindex,fastembed]"
+```
+
+3. Heavier parsing / OCR stacks only when you need them
+
+```bash
+pip install -e ".[unstructured]"
+pip install -e ".[docling]"
+pip install -e ".[paddleocr]"
+pip install -e ".[surya]"
+```
+
+This is more reliable than trying to install every heavy optional dependency in one shot.
+
+### Sentence-transformers note
+
+If you use the `Sentence Transformers` retriever in the Streamlit Playground, keep the environment healthy:
+
+- `numpy<2` is often the safer choice for mixed compiled dependencies
+- on some Macs, newer `torch` wheels may not be available, so a working combo can look like:
+  - `torch==2.2.2`
+  - `transformers==4.49.0`
+  - `sentence-transformers==3.4.1`
+
+If Streamlit becomes noisy while inspecting `transformers`, run it with file watching disabled:
+
+```bash
+STREAMLIT_SERVER_FILE_WATCHER_TYPE=none PYTHONPATH=src python -m streamlit run src/mare/streamlit_app.py
 ```
 
 ### What this means in practice
@@ -550,7 +597,13 @@ If you want to show this to users visually, run the Streamlit demo:
 
 ```bash
 pip install -e ".[ui]"
-PYTHONPATH=src streamlit run src/mare/streamlit_app.py
+PYTHONPATH=src python -m streamlit run src/mare/streamlit_app.py
+```
+
+If you use the `Sentence Transformers` option in Advanced mode and Streamlit starts emitting transformer watcher noise, prefer:
+
+```bash
+STREAMLIT_SERVER_FILE_WATCHER_TYPE=none PYTHONPATH=src python -m streamlit run src/mare/streamlit_app.py
 ```
 
 The demo lets a user:
@@ -562,6 +615,16 @@ The demo lets a user:
 - view the rendered page image
 - view the highlighted evidence image when available
 - inspect extracted objects on the best page
+
+The Streamlit app is the easiest way to explore MARE visually.
+The Python package is where developers get full control over:
+
+- custom parsers
+- custom retrievers
+- vector backends
+- rerankers
+- framework integrations
+- evaluation harnesses
 
 For non-text objects such as tables and figures, MARE now falls back to region-level page highlighting when exact text-span highlighting is not available yet.
 
