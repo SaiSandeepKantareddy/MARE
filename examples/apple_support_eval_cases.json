@@ -8,6 +8,13 @@
       "top_k": 3
     },
     {
+      "query": "what tools are required",
+      "expected_doc_id": "macbook\u00a0pro-(14-inch,-m5-pro-or-m5-max)-magsafe-3-board---apple-support-p1",
+      "expected_page": 1,
+      "expected_object_type": "section",
+      "top_k": 3
+    },
+    {
       "query": "show me the comparison table",
       "expect_no_result": true,
       "top_k": 3
