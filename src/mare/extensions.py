@@ -569,45 +569,111 @@ class HybridSemanticRetriever(BaseRetriever):
         documents: list,
         *,
         model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-        lexical_weight: float = 0.7,
-        semantic_weight: float = 0.3,
+        lexical_weight: float = 0.55,
+        semantic_weight: float = 0.2,
+        object_semantic_weight: float = 0.25,
         semantic_retriever: SentenceTransformersRetriever | None = None,
         lexical_retriever: TextRetriever | None = None,
     ) -> None:
         super().__init__(documents)
         self.lexical_weight = lexical_weight
         self.semantic_weight = semantic_weight
+        self.object_semantic_weight = object_semantic_weight
         self.semantic_retriever = semantic_retriever or SentenceTransformersRetriever(documents, model_name=model_name)
         self.lexical_retriever = lexical_retriever or TextRetriever(documents)
+        self._object_entries = None
+        self._object_embeddings = None
+
+    def _get_object_entries(self):
+        if self._object_entries is not None:
+            return self._object_entries
+        entries = []
+        for document in self.documents:
+            for obj in document.objects:
+                label = obj.metadata.get("label", "")
+                heading = obj.metadata.get("heading", "")
+                object_text = " ".join(part for part in [label, heading, obj.content] if part).strip()
+                if not object_text:
+                    continue
+                entries.append((document, obj, object_text))
+        self._object_entries = entries
+        return self._object_entries
+
+    def _get_object_embeddings(self):
+        if self._object_embeddings is not None:
+            return self._object_embeddings
+        model = self.semantic_retriever._get_model()
+        entries = self._get_object_entries()
+        texts = [text for _, _, text in entries]
+        self._object_embeddings = list(_encode_with_fallback(model, texts)) if texts else []
+        return self._object_embeddings
 
     def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
         lexical_hits = self.lexical_retriever.retrieve(query=query, top_k=max(top_k * 2, top_k))
         semantic_hits = self.semantic_retriever.retrieve(query=query, top_k=max(top_k * 2, top_k))
+        semantic_model = self.semantic_retriever._get_model()
+        query_embedding = list(_encode_with_fallback(semantic_model, [query]))[0]
 
         lexical_by_doc = {hit.doc_id: hit for hit in lexical_hits}
         semantic_by_doc = {hit.doc_id: hit for hit in semantic_hits}
         doc_ids = list(dict.fromkeys([hit.doc_id for hit in lexical_hits + semantic_hits]))
 
+        object_hits_by_doc: dict[str, RetrievalHit] = {}
+        for (document, obj, object_text), embedding in zip(self._get_object_entries(), self._get_object_embeddings()):
+            object_score = _cosine_similarity(query_embedding, embedding)
+            if object_score <= 0:
+                continue
+            existing = object_hits_by_doc.get(document.doc_id)
+            if existing is not None and existing.score >= object_score:
+                continue
+            object_hits_by_doc[document.doc_id] = RetrievalHit(
+                doc_id=document.doc_id,
+                title=document.title,
+                page=document.page,
+                modality=self.modality,
+                score=round(object_score, 4),
+                reason=f"object-semantic match via {self.semantic_retriever.model_name} on {obj.object_type.value}",
+                snippet=obj.content,
+                page_image_path=document.page_image_path,
+                object_id=obj.object_id,
+                object_type=obj.object_type.value,
+                metadata={**document.metadata, **obj.metadata},
+            )
+
+        doc_ids = list(dict.fromkeys(doc_ids + list(object_hits_by_doc.keys())))
+
         lexical_max = max((hit.score for hit in lexical_hits), default=1.0) or 1.0
         semantic_max = max((hit.score for hit in semantic_hits), default=1.0) or 1.0
+        object_semantic_max = max((hit.score for hit in object_hits_by_doc.values()), default=1.0) or 1.0
 
         merged: list[RetrievalHit] = []
         for doc_id in doc_ids:
             lexical_hit = lexical_by_doc.get(doc_id)
             semantic_hit = semantic_by_doc.get(doc_id)
-            if not lexical_hit and not semantic_hit:
+            object_semantic_hit = object_hits_by_doc.get(doc_id)
+            if not lexical_hit and not semantic_hit and not object_semantic_hit:
                 continue
 
             lexical_norm = (lexical_hit.score / lexical_max) if lexical_hit else 0.0
             semantic_norm = (semantic_hit.score / semantic_max) if semantic_hit else 0.0
-            hybrid_score = round((self.lexical_weight * lexical_norm) + (self.semantic_weight * semantic_norm), 4)
+            object_semantic_norm = (object_semantic_hit.score / object_semantic_max) if object_semantic_hit else 0.0
+            hybrid_score = round(
+                (self.lexical_weight * lexical_norm)
+                + (self.semantic_weight * semantic_norm)
+                + (self.object_semantic_weight * object_semantic_norm),
+                4,
+            )
 
-            primary = lexical_hit or semantic_hit
+            primary = lexical_hit or object_semantic_hit or semantic_hit
             reason_parts: list[str] = []
             if lexical_hit:
                 reason_parts.append(f"lexical:{lexical_hit.reason}")
             if semantic_hit:
                 reason_parts.append(f"semantic:{semantic_hit.reason}")
+            if object_semantic_hit:
+                reason_parts.append(f"object-semantic:{object_semantic_hit.reason}")
+
+            preferred_object_hit = lexical_hit if lexical_hit and lexical_hit.object_type else object_semantic_hit
 
             merged.append(
                 RetrievalHit(
@@ -617,14 +683,44 @@ class HybridSemanticRetriever(BaseRetriever):
                     modality=self.modality,
                     score=hybrid_score,
                     reason=" | ".join(reason_parts),
-                    snippet=lexical_hit.snippet if lexical_hit and lexical_hit.snippet else primary.snippet,
+                    snippet=(
+                        lexical_hit.snippet
+                        if lexical_hit and lexical_hit.snippet
+                        else (object_semantic_hit.snippet if object_semantic_hit else primary.snippet)
+                    ),
                     page_image_path=primary.page_image_path,
-                    highlight_image_path=lexical_hit.highlight_image_path if lexical_hit else primary.highlight_image_path,
-                    object_id=lexical_hit.object_id if lexical_hit else primary.object_id,
-                    object_type=lexical_hit.object_type if lexical_hit else primary.object_type,
-                    metadata=dict((lexical_hit or primary).metadata),
+                    highlight_image_path=(
+                        lexical_hit.highlight_image_path
+                        if lexical_hit and lexical_hit.highlight_image_path
+                        else (
+                            object_semantic_hit.highlight_image_path if object_semantic_hit else primary.highlight_image_path
+                        )
+                    ),
+                    object_id=preferred_object_hit.object_id if preferred_object_hit else primary.object_id,
+                    object_type=preferred_object_hit.object_type if preferred_object_hit else primary.object_type,
+                    metadata=dict((preferred_object_hit or lexical_hit or primary).metadata),
                 )
             )
+
+        from mare.highlight import render_highlighted_page, render_object_region_highlight
+
+        for hit in merged:
+            source_pdf = hit.metadata.get("source", "")
+            if source_pdf and hit.page_image_path and hit.snippet and not hit.highlight_image_path:
+                hit.highlight_image_path = render_highlighted_page(
+                    pdf_path=source_pdf,
+                    page_number=hit.page,
+                    page_image_path=hit.page_image_path,
+                    query=query,
+                    snippet=hit.snippet,
+                )
+            if not hit.highlight_image_path and hit.page_image_path and hit.object_type in {"table", "figure", "section"}:
+                hit.highlight_image_path = render_object_region_highlight(
+                    page_image_path=hit.page_image_path,
+                    page_number=hit.page,
+                    object_type=hit.object_type,
+                    metadata=hit.metadata,
+                )
 
         return sorted(merged, key=lambda hit: hit.score, reverse=True)[:top_k]
 

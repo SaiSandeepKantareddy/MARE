@@ -580,8 +580,17 @@ def test_hybrid_semantic_retriever_preserves_lexical_evidence_and_semantic_reaso
             return [lexical_hit]
 
     class _StubSemanticRetriever:
+        model_name = "all-MiniLM"
+
         def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
             return [semantic_hit]
+
+        def _get_model(self):
+            class _Model:
+                def encode(self, texts, **kwargs):
+                    return [[1.0, 0.0] for _ in texts]
+
+            return _Model()
 
     retriever = HybridSemanticRetriever(
         [Document(doc_id="doc-1", title="Manual", page=10, text="Connect the AC adapter to the laptop.")],
@@ -596,6 +605,72 @@ def test_hybrid_semantic_retriever_preserves_lexical_evidence_and_semantic_reaso
     assert hits[0].snippet == "Connect the AC adapter to the laptop."
     assert "lexical:" in hits[0].reason
     assert "semantic:" in hits[0].reason
+
+
+def test_hybrid_semantic_retriever_uses_object_level_semantic_matches() -> None:
+    semantic_hit = RetrievalHit(
+        doc_id="doc-1",
+        title="Manual",
+        page=10,
+        modality=Modality.TEXT,
+        score=0.2,
+        reason="sentence-transformers semantic match via all-MiniLM",
+        snippet="generic page text",
+    )
+
+    class _StubLexicalRetriever:
+        def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+            return []
+
+    class _StubSemanticRetriever:
+        def __init__(self) -> None:
+            self.model_name = "all-MiniLM"
+
+        def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+            return [semantic_hit]
+
+        def _get_model(self):
+            class _Model:
+                def encode(self, texts, **kwargs):
+                    vectors = []
+                    for text in texts:
+                        lowered = text.lower()
+                        if "wake on lan" in lowered:
+                            vectors.append([0.0, 1.0])
+                        else:
+                            vectors.append([1.0, 0.0])
+                    return vectors
+
+            return _Model()
+
+    retriever = HybridSemanticRetriever(
+        [
+            Document(
+                doc_id="doc-1",
+                title="Manual",
+                page=61,
+                text="Power settings and device behavior.",
+                objects=[
+                    DocumentObject(
+                        object_id="doc-1:procedure:1",
+                        doc_id="doc-1",
+                        page=61,
+                        object_type=ObjectType.PROCEDURE,
+                        content="Wake on LAN feature setup instructions.",
+                        metadata={"heading": "Wake on LAN"},
+                    )
+                ],
+            )
+        ],
+        lexical_retriever=_StubLexicalRetriever(),
+        semantic_retriever=_StubSemanticRetriever(),
+    )
+    hits = retriever.retrieve("how do I configure wake on lan", top_k=1)
+
+    assert len(hits) == 1
+    assert hits[0].object_type == "procedure"
+    assert "Wake on LAN" in hits[0].snippet
+    assert "object-semantic:" in hits[0].reason
 
 
 def test_qdrant_indexer_builds_collection_and_upserts_points(monkeypatch) -> None:
