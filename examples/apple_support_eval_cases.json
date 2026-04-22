@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "query": "partially reinstall the set screws if they fall out",
+      "expected_doc_id": "macbook\u00a0pro-(14-inch,-m5-pro-or-m5-max)-magsafe-3-board---apple-support-p2",
+      "expected_page": 2,
+      "expected_object_type": "procedure",
+      "top_k": 3
+    },
+    {
+      "query": "show me the comparison table",
+      "expect_no_result": true,
+      "top_k": 3
+    }
+  ]
+}

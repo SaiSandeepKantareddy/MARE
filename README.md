@@ -197,6 +197,36 @@ mv ./*.pdf ./manual.pdf
 PYTHONPATH=src python3 ask.py ./manual.pdf "partially reinstall the set screws if they fall out"
 ```
 
+## Benchmarking real manuals
+
+MARE now supports stack comparison in the eval harness so you can compare the built-in default against stronger advanced paths on the same corpus.
+
+Example: compare the built-in stack against hybrid semantic retrieval on a generated corpus:
+
+```bash
+PYTHONPATH=src python3 -m mare.eval \
+  --corpus generated/116441.json \
+  --eval examples/manual_116441_eval_cases.json \
+  --stack builtin \
+  --stack hybrid-semantic
+```
+
+Example: compare on the Apple support corpus:
+
+```bash
+PYTHONPATH=src python3 -m mare.eval \
+  --corpus "generated/MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.json" \
+  --eval examples/apple_support_eval_cases.json \
+  --stack builtin \
+  --stack hybrid-semantic
+```
+
+These example eval files are intentionally small and opinionated. They are meant to help you compare:
+
+- the default built-in retrieval path
+- the hybrid semantic path
+- whether semantic retrieval is actually improving grounded evidence on your PDFs
+
 ## Public Python API
 
 The package is meant to be importable, not just runnable from scripts.
