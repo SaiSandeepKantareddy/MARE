@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from mare.eval import EvalCase, evaluate_cases, evaluate_corpus, load_eval_cases
+import sys
+import types
+
+from mare.eval import EvalCase, compare_stacks, create_app_for_stack, evaluate_cases, evaluate_corpus, load_eval_cases
 from mare.types import Document, DocumentObject, ObjectType
 
 
@@ -95,3 +98,44 @@ def test_evaluate_corpus_runs_end_to_end(tmp_path: Path) -> None:
 
     assert summary.total_cases == 4
     assert len(results) == 4
+
+
+def test_create_app_for_stack_supports_builtin() -> None:
+    app = create_app_for_stack(_docs(), "builtin")
+
+    best = app.best_match("what is positional encoding")
+    assert best is not None
+    assert best.doc_id == "paper-hyde-p3"
+
+
+def test_compare_stacks_returns_reports_for_multiple_modes(tmp_path: Path, monkeypatch) -> None:
+    class _FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def encode(self, texts, **kwargs):
+            vectors = []
+            for text in texts:
+                lowered = text.lower()
+                if "positional encoding" in lowered:
+                    vectors.append([1.0, 0.0])
+                elif "architecture diagram" in lowered or "figure 1" in lowered:
+                    vectors.append([0.0, 1.0])
+                else:
+                    vectors.append([0.5, 0.5])
+            return vectors
+
+    fake_st_module = types.ModuleType("sentence_transformers")
+    fake_st_module.SentenceTransformer = _FakeSentenceTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st_module)
+
+    corpus = tmp_path / "sample_corpus.json"
+    corpus.write_text(Path("examples/sample_corpus.json").read_text())
+    eval_file = tmp_path / "eval_cases.json"
+    eval_file.write_text(Path("examples/eval_cases.json").read_text())
+
+    reports = compare_stacks(corpus, eval_file, ["builtin", "hybrid-semantic"])
+
+    assert set(reports) == {"builtin", "hybrid-semantic"}
+    assert reports["builtin"][0].total_cases == 4
+    assert reports["hybrid-semantic"][0].total_cases == 4

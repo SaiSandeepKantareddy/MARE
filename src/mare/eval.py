@@ -7,6 +7,8 @@ from pathlib import Path
 
 from mare.api import MAREApp
 from mare.demo import load_documents
+from mare.extensions import HybridSemanticRetriever, MAREConfig, SentenceTransformersRetriever
+from mare.types import Modality
 
 
 @dataclass
@@ -58,10 +60,25 @@ class EvalSummary:
         return round(self.no_result_correct / self.total_cases, 4) if self.total_cases else 0.0
 
 
+SUPPORTED_STACKS = ("builtin", "hybrid-semantic", "sentence-transformers")
+
+
 def load_eval_cases(path: str | Path) -> list[EvalCase]:
     payload = json.loads(Path(path).read_text())
     raw_cases = payload.get("cases", payload)
     return [EvalCase(**case) for case in raw_cases]
+
+
+def create_app_for_stack(documents, stack: str) -> MAREApp:
+    if stack == "builtin":
+        return MAREApp.from_documents(documents)
+    if stack == "hybrid-semantic":
+        config = MAREConfig(retriever_factories={Modality.TEXT: lambda docs: HybridSemanticRetriever(docs)})
+        return MAREApp.from_documents(documents, config=config)
+    if stack == "sentence-transformers":
+        config = MAREConfig(retriever_factories={Modality.TEXT: lambda docs: SentenceTransformersRetriever(docs)})
+        return MAREApp.from_documents(documents, config=config)
+    raise ValueError(f"Unsupported stack '{stack}'. Expected one of: {', '.join(SUPPORTED_STACKS)}")
 
 
 def evaluate_cases(app: MAREApp, cases: list[EvalCase]) -> tuple[EvalSummary, list[EvalCaseResult]]:
@@ -116,6 +133,20 @@ def evaluate_corpus(corpus_path: str | Path, eval_path: str | Path) -> tuple[Eva
     return evaluate_cases(app, cases)
 
 
+def compare_stacks(
+    corpus_path: str | Path,
+    eval_path: str | Path,
+    stacks: list[str],
+) -> dict[str, tuple[EvalSummary, list[EvalCaseResult]]]:
+    documents = load_documents(Path(corpus_path))
+    cases = load_eval_cases(eval_path)
+    reports: dict[str, tuple[EvalSummary, list[EvalCaseResult]]] = {}
+    for stack in stacks:
+        app = create_app_for_stack(documents, stack)
+        reports[stack] = evaluate_cases(app, cases)
+    return reports
+
+
 def _format_output(summary: EvalSummary, results: list[EvalCaseResult]) -> dict:
     return {
         "summary": {
@@ -129,11 +160,44 @@ def _format_output(summary: EvalSummary, results: list[EvalCaseResult]) -> dict:
     }
 
 
+def _format_comparison_output(reports: dict[str, tuple[EvalSummary, list[EvalCaseResult]]]) -> dict:
+    return {
+        "comparison": {
+            stack: {
+                "summary": {
+                    **asdict(summary),
+                    "page_hit_rate": summary.page_hit_rate,
+                    "doc_hit_rate": summary.doc_hit_rate,
+                    "object_hit_rate": summary.object_hit_rate,
+                    "no_result_accuracy": summary.no_result_accuracy,
+                },
+                "results": [asdict(result) for result in results],
+            }
+            for stack, (summary, results) in reports.items()
+        }
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a MARE evaluation harness over a corpus and benchmark cases")
     parser.add_argument("--corpus", required=True, help="Path to a MARE corpus JSON file")
     parser.add_argument("--eval", required=True, help="Path to an evaluation JSON file")
+    parser.add_argument(
+        "--stack",
+        action="append",
+        dest="stacks",
+        choices=SUPPORTED_STACKS,
+        help="Evaluate a specific retrieval stack. Repeat to compare multiple stacks.",
+    )
     args = parser.parse_args()
+
+    if args.stacks:
+        try:
+            reports = compare_stacks(args.corpus, args.eval, args.stacks)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
+        print(json.dumps(_format_comparison_output(reports), indent=2))
+        return
 
     summary, results = evaluate_corpus(args.corpus, args.eval)
     print(json.dumps(_format_output(summary, results), indent=2))
