@@ -144,9 +144,36 @@ The intended package install after PyPI release is:
 pip install mare-retrieval
 ```
 
-That base install is intentionally lightweight. Optional stacks such as Streamlit, sentence-transformers, FAISS, LangChain, OCR parsers, and other advanced integrations are installed through extras.
+What each install path gives you:
+
+- `git clone` by itself does not install anything. It only gives you the source tree.
+- `pip install mare-retrieval` installs the lightweight core package from PyPI.
+- `pip install "git+https://github.com/SaiSandeepKantareddy/MARE.git"` installs the same core package directly from GitHub.
+- `pip install -e ".[dev]"` from a clone installs the repo in editable mode plus test dependencies.
+
+That base install is intentionally lightweight. It is enough for the built-in stack:
+
+- local PDF ingestion
+- page-level corpus generation
+- built-in lexical and object-aware retrieval
+- page images and evidence highlighting
+- Python API and CLI usage
+
+Optional stacks such as Streamlit, sentence-transformers, FAISS, LangChain, OCR parsers, and other advanced integrations are installed through extras.
 
 For most users, the best starting point is still MARE's built-in stack. The optional integrations are there to support experimentation, scaling, OCR-heavy documents, or agent/framework integration without changing the evidence-first contract.
+
+Common extras:
+
+```bash
+pip install "mare-retrieval[ui]"
+pip install "mare-retrieval[sentence-transformers]"
+pip install "mare-retrieval[faiss]"
+pip install "mare-retrieval[langchain]"
+pip install "mare-retrieval[llamaindex]"
+pip install "mare-retrieval[mcp]"
+pip install "mare-retrieval[integrations]"
+```
 
 Then use it as a library:
 
@@ -166,6 +193,29 @@ Or try it from the CLI after ingesting a real PDF:
 ```bash
 mare-ingest "manual.pdf"
 mare-demo --corpus "generated/manual.json" --query "how do I connect the AC adapter"
+```
+
+## Developer onboarding
+
+If you want a plug-and-play exploration path as a developer, start with:
+
+- `DEVELOPER_GUIDE.md`
+- `examples/developer_playground.ipynb`
+
+These are designed to help you:
+
+- ingest a local PDF
+- run a few example queries
+- inspect the returned evidence
+- look at extracted page objects
+- explore MARE from the core install before deciding which optional extras you need
+
+If you are working from a clone:
+
+```bash
+pip install -e ".[dev]"
+pip install notebook
+jupyter notebook examples/developer_playground.ipynb
 ```
 
 ## Simplest way to use it
@@ -201,6 +251,18 @@ PYTHONPATH=src python3 ask.py ./manual.pdf "partially reinstall the set screws i
 
 MARE now supports stack comparison in the eval harness so you can compare the built-in default against stronger advanced paths on the same corpus.
 
+Important:
+
+- the eval case files in `examples/` are included in the repo
+- the generated corpus JSON files in `generated/` are local artifacts, not something users should assume exists after a fresh clone or package install
+- before running the eval commands below, generate the corpus locally from the source PDF
+
+Example: generate the manual corpus first:
+
+```bash
+mare-ingest 116441.pdf
+```
+
 Example: compare the built-in stack against hybrid semantic retrieval on a generated corpus:
 
 ```bash
@@ -211,6 +273,12 @@ PYTHONPATH=src python3 -m mare.eval \
   --stack hybrid-semantic
 ```
 
+Generate the Apple support corpus first:
+
+```bash
+mare-ingest "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf"
+```
+
 Example: compare on the Apple support corpus:
 
 ```bash
@@ -219,6 +287,12 @@ PYTHONPATH=src python3 -m mare.eval \
   --eval examples/apple_support_eval_cases.json \
   --stack builtin \
   --stack hybrid-semantic
+```
+
+Generate the research paper corpus first from your own PDF file with a matching filename, or adjust the output path in the eval command:
+
+```bash
+mare-ingest "./543_Thinking_with_Reasoning_Sk.pdf"
 ```
 
 Example: compare on a research paper corpus:
@@ -237,6 +311,12 @@ These example eval files are intentionally small and opinionated. They are meant
 - the hybrid semantic path
 - whether semantic retrieval is actually improving grounded evidence on your PDFs
 - how MARE behaves across different PDF genres such as manuals and research papers
+
+If you are evaluating advanced retrieval stacks such as `hybrid-semantic`, install the matching extras first. For example:
+
+```bash
+pip install "mare-retrieval[sentence-transformers]"
+```
 
 ## Public Python API
 
