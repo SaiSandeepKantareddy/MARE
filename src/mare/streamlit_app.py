@@ -257,6 +257,29 @@ def _selected_option_payload(options: dict[str, dict], label: str) -> dict:
     return options[label]
 
 
+def _build_run_signature(uploaded_filename: str, query: str, top_k: int, stack_controls: dict) -> dict[str, object]:
+    return {
+        "filename": uploaded_filename,
+        "query": query.strip(),
+        "top_k": top_k,
+        "mode": stack_controls["mode"],
+        "parser": stack_controls["parser"]["value"],
+        "retriever": stack_controls["retriever"]["value"],
+        "reranker": stack_controls["reranker"]["value"],
+        "output": stack_controls["output"]["value"],
+        "reuse_corpus": bool(stack_controls["reuse_corpus"]),
+        "qdrant_url": stack_controls["qdrant_url"],
+        "qdrant_collection": stack_controls["qdrant_collection"],
+        "qdrant_index_before_query": bool(stack_controls["qdrant_index_before_query"]),
+    }
+
+
+def _result_matches_signature(result: dict | None, run_signature: dict[str, object]) -> bool:
+    if not result:
+        return False
+    return result.get("run_signature") == run_signature
+
+
 def _render_stack_summary(st, stack: dict) -> None:
     st.markdown(
         f"""
@@ -409,6 +432,12 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
         ),
         "indexing": indexing_summary,
     }
+    run_signature = _build_run_signature(
+        uploaded_filename=uploaded_pdf.name,
+        query=query,
+        top_k=top_k,
+        stack_controls=stack_controls,
+    )
 
     st.session_state["mare_result"] = {
         "query": query,
@@ -418,6 +447,7 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
         "app": app,
         "stack": stack_summary,
         "output_preview": output_preview,
+        "run_signature": run_signature,
     }
 
 
@@ -537,6 +567,32 @@ def main() -> None:
         _run_query(st, uploaded_pdf, query, top_k, stack_controls)
 
     result = st.session_state.get("mare_result")
+    current_signature = _build_run_signature(
+        uploaded_filename=uploaded_pdf.name,
+        query=query,
+        top_k=top_k,
+        stack_controls=stack_controls,
+    )
+    result_is_current = _result_matches_signature(result, current_signature)
+
+    if result and not result_is_current:
+        st.warning(
+            "The current file, query, or stack controls changed since the last run. Click `Ask MARE` to refresh the evidence with the current settings."
+        )
+        st.markdown(
+            """
+            <div class="mare-card" style="margin-bottom:1rem;">
+              <div class="mare-label">Current configuration changed</div>
+              <div class="mare-value">Result hidden until rerun</div>
+              <p class="mare-mini" style="margin-top:0.7rem;">
+                This avoids showing evidence from an older parser, retriever, reranker, or query after you change the controls.
+              </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        result = None
+
     if not result:
         st.markdown(
             f"""
