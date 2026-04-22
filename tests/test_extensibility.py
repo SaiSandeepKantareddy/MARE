@@ -7,6 +7,7 @@ import types
 from pathlib import Path
 
 import mare.ingest as ingest_module
+import pytest
 from mare import (
     FAISSIndexer,
     FAISSRetriever,
@@ -478,6 +479,23 @@ def test_sentence_transformers_retriever_uses_semantic_similarity(monkeypatch) -
     assert hits[0].doc_id == "doc-1"
     assert "sentence-transformers semantic match" in hits[0].reason
     assert math.isclose(hits[0].score, 1.0, rel_tol=0.0, abs_tol=1e-6)
+
+
+def test_sentence_transformers_retriever_surfaces_environment_guidance(monkeypatch) -> None:
+    class _BrokenSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            raise RuntimeError("NumPy compatibility issue")
+
+    fake_st_module = types.ModuleType("sentence_transformers")
+    fake_st_module.SentenceTransformer = _BrokenSentenceTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st_module)
+
+    retriever = SentenceTransformersRetriever(
+        [Document(doc_id="doc-1", title="Manual", page=1, text="Connect the adapter.")]
+    )
+
+    with pytest.raises(RuntimeError, match="numpy<2"):
+        retriever.retrieve("adapter", top_k=1)
 
 
 def test_qdrant_indexer_builds_collection_and_upserts_points(monkeypatch) -> None:

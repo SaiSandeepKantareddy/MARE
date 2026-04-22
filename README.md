@@ -324,6 +324,9 @@ If you use the `Sentence Transformers` retriever in the Streamlit Playground, ke
   - `torch==2.2.2`
   - `transformers==4.49.0`
   - `sentence-transformers==3.4.1`
+- if you install heavier extras later, especially `docling`, they may upgrade `numpy` again; if the semantic retriever starts failing after that, re-pin:
+  - `pip install "numpy<2"`
+  - then reinstall the compatible torch stack if needed
 
 If Streamlit becomes noisy while inspecting `transformers`, run it with file watching disabled:
 

@@ -483,7 +483,15 @@ class SentenceTransformersRetriever(BaseRetriever):
                 "SentenceTransformersRetriever requires `sentence-transformers`. Install it with "
                 "`pip install 'mare-retrieval[sentence-transformers]'` or `pip install sentence-transformers`."
             ) from exc
-        self.model = SentenceTransformer(self.model_name)
+        try:
+            self.model = SentenceTransformer(self.model_name)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "SentenceTransformersRetriever could not initialize the sentence-transformers stack. "
+                "A common cause is an incompatible NumPy / torch environment after installing heavier extras "
+                "such as Docling. On this setup, the safest fix is usually to keep `numpy<2` and use a compatible "
+                "torch stack such as `torch==2.2.2`, `transformers==4.49.0`, and `sentence-transformers==3.4.1`."
+            ) from exc
         return self.model
 
     def _get_doc_embeddings(self):
