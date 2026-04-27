@@ -1,6 +1,6 @@
 """MARE: Modality-Aware Retrieval Engine."""
 
-from .api import MAREApp, load_corpus, load_pdf
+from .api import MAREApp, load_corpora, load_corpus, load_pdf
 from .engine import MAREngine
 from .eval import EvalCase, EvalCaseResult, EvalSummary, evaluate_cases, evaluate_corpus, load_eval_cases
 from .extensions import (
@@ -36,6 +36,7 @@ from .mcp_server import (
     describe_corpus_tool,
     ingest_pdf_tool,
     page_objects_tool,
+    query_corpora_tool,
     query_corpus_tool,
     query_pdf_tool,
     search_objects_tool,
@@ -70,6 +71,7 @@ __all__ = [
     "evaluate_cases",
     "evaluate_corpus",
     "load_corpus",
+    "load_corpora",
     "load_eval_cases",
     "load_pdf",
     "MAREConfig",
@@ -78,6 +80,7 @@ __all__ = [
     "Modality",
     "PaddleOCRParser",
     "page_objects_tool",
+    "query_corpora_tool",
     "QueryPlan",
     "query_corpus_tool",
     "query_pdf_tool",

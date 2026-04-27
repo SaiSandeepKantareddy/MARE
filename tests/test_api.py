@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from mare import MAREApp, load_corpus
+from mare import MAREApp, load_corpora, load_corpus
 from mare.types import Document
 
 
@@ -34,3 +34,23 @@ def test_load_corpus_wraps_existing_json(tmp_path: Path) -> None:
 
     assert app.corpus_path == corpus
     assert app.best_match("set screws").page == 2
+
+
+def test_load_corpora_combines_multiple_json_corpora(tmp_path: Path) -> None:
+    corpus_a = tmp_path / "manual-a.json"
+    corpus_b = tmp_path / "manual-b.json"
+    corpus_a.write_text(
+        '{"documents":[{"doc_id":"a-1","title":"Manual A","page":1,"text":"Wake on LAN feature setup.","image_caption":"","layout_hints":"","page_image_path":"generated/a/page-1.png","metadata":{"source":"manual-a.pdf"}}]}'
+    )
+    corpus_b.write_text(
+        '{"documents":[{"doc_id":"b-4","title":"Manual B","page":4,"text":"Use the torque driver to reinstall the board.","image_caption":"","layout_hints":"","page_image_path":"generated/b/page-4.png","metadata":{"source":"manual-b.pdf"}}]}'
+    )
+
+    app = load_corpora([corpus_a, corpus_b])
+
+    assert len(app.documents) == 2
+    assert len(app.corpus_paths) == 2
+    assert app.best_match("torque driver").doc_id == "b-4"
+    summary = app.describe_corpus(page_limit=2, object_limit=1)
+    assert summary["corpus_count"] == 2
+    assert len(summary["corpus_paths"]) == 2

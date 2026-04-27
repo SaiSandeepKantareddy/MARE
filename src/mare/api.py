@@ -15,11 +15,17 @@ from mare.types import Document, DocumentObject, RetrievalExplanation, Retrieval
 class MAREApp:
     documents: list[Document]
     corpus_path: Path | None = None
+    corpus_paths: list[Path] = field(default_factory=list)
     source_pdf: Path | None = None
+    source_pdfs: list[Path] = field(default_factory=list)
     config: MAREConfig = field(default_factory=MAREConfig)
     engine: MAREngine = field(init=False)
 
     def __post_init__(self) -> None:
+        if self.corpus_path and not self.corpus_paths:
+            self.corpus_paths = [self.corpus_path]
+        if self.source_pdf and not self.source_pdfs:
+            self.source_pdfs = [self.source_pdf]
         self.engine = MAREngine(self.documents, config=self.config)
 
     @classmethod
@@ -30,7 +36,32 @@ class MAREApp:
     def from_corpus(cls, corpus_path: str | Path, config: MAREConfig | None = None) -> "MAREApp":
         path = Path(corpus_path)
         documents = load_documents(path)
-        return cls(documents=documents, corpus_path=path, config=config or MAREConfig())
+        source_pdfs = cls._source_pdfs_from_documents(documents)
+        primary_source = source_pdfs[0] if len(source_pdfs) == 1 else None
+        return cls(
+            documents=documents,
+            corpus_path=path,
+            corpus_paths=[path],
+            source_pdf=primary_source,
+            source_pdfs=source_pdfs,
+            config=config or MAREConfig(),
+        )
+
+    @classmethod
+    def from_corpora(cls, corpus_paths: list[str | Path], config: MAREConfig | None = None) -> "MAREApp":
+        paths = [Path(path) for path in corpus_paths]
+        documents: list[Document] = []
+        for path in paths:
+            documents.extend(load_documents(path))
+        source_pdfs = cls._source_pdfs_from_documents(documents)
+        primary_source = source_pdfs[0] if len(source_pdfs) == 1 else None
+        return cls(
+            documents=documents,
+            corpus_paths=paths,
+            source_pdf=primary_source,
+            source_pdfs=source_pdfs,
+            config=config or MAREConfig(),
+        )
 
     @classmethod
     def from_pdf(
@@ -108,7 +139,10 @@ class MAREApp:
 
         return {
             "corpus_path": str(self.corpus_path) if self.corpus_path else "",
+            "corpus_paths": [str(path) for path in self.corpus_paths],
+            "corpus_count": len(self.corpus_paths) if self.corpus_paths else (1 if self.corpus_path else 0),
             "source_pdf": str(self.source_pdf) if self.source_pdf else "",
+            "source_pdfs": [str(path) for path in self.source_pdfs],
             "title": self.documents[0].title if self.documents else "",
             "page_count": len(self.documents),
             "document_count": len(self.documents),
@@ -195,9 +229,24 @@ class MAREApp:
     def _tokenize(text: str) -> list[str]:
         return re.findall(r"[a-z0-9]+", text.lower())
 
+    @staticmethod
+    def _source_pdfs_from_documents(documents: list[Document]) -> list[Path]:
+        seen: set[str] = set()
+        paths: list[Path] = []
+        for document in documents:
+            source = document.metadata.get("source", "")
+            if source and source not in seen:
+                seen.add(source)
+                paths.append(Path(source))
+        return paths
+
 
 def load_corpus(corpus_path: str | Path, config: MAREConfig | None = None) -> MAREApp:
     return MAREApp.from_corpus(corpus_path, config=config)
+
+
+def load_corpora(corpus_paths: list[str | Path], config: MAREConfig | None = None) -> MAREApp:
+    return MAREApp.from_corpora(corpus_paths, config=config)
 
 
 def load_pdf(

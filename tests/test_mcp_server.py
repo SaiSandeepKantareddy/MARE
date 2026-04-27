@@ -6,6 +6,7 @@ from mare.mcp_server import (
     describe_corpus_tool,
     ingest_pdf_tool,
     page_objects_tool,
+    query_corpora_tool,
     query_corpus_tool,
     query_pdf_tool,
     search_objects_tool,
@@ -133,6 +134,15 @@ def test_query_corpus_tool_returns_evidence_payload(monkeypatch) -> None:
     payload = query_corpus_tool("generated/manual.json", "connect the adapter", top_k=1)
 
     assert payload["corpus_path"] == "generated/manual.json"
+    assert payload["results"][0]["page"] == 10
+
+
+def test_query_corpora_tool_returns_evidence_payload(monkeypatch) -> None:
+    monkeypatch.setattr("mare.mcp_server.load_corpora", lambda **kwargs: _FakeApp())
+
+    payload = query_corpora_tool(["generated/manual-a.json", "generated/manual-b.json"], "connect the adapter", top_k=1)
+
+    assert payload["corpus_count"] == 2
     assert payload["results"][0]["page"] == 10
 
 

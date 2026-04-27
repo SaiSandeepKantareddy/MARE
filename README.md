@@ -364,10 +364,18 @@ candidate_objects = app.search_objects("wake on lan", object_type="section", lim
 final_hits = app.retrieve("how do I configure wake on lan", top_k=3)
 ```
 
+Example: query across multiple generated corpora while preserving the same evidence-first result shape.
+
+```python
+app = load_corpora(["generated/manual-a.json", "generated/manual-b.json"])
+best = app.best_match("where is wake on lan discussed", top_k=5)
+```
+
 Core methods:
 
 - `MAREApp.from_pdf(...)`
 - `MAREApp.from_corpus(...)`
+- `MAREApp.from_corpora(...)`
 - `MAREApp.from_documents(...)`
 - `app.explain(query)`
 - `app.retrieve(query)`
@@ -670,6 +678,7 @@ The MCP server exposes focused tools for the evidence layer:
 - `ingest_pdf`
 - `query_pdf`
 - `query_corpus`
+- `query_corpora`
 - `page_objects`
 - `describe_corpus`
 - `search_objects`
@@ -704,6 +713,7 @@ pip install "mare-retrieval[mcp]"
    - `describe_corpus` first when it needs to understand what pages, signals, and object types exist in the PDF
    - `query_pdf` when it has a PDF path and needs grounded evidence directly
    - `query_corpus` when the PDF was already ingested and you want faster repeated retrieval
+   - `query_corpora` when the agent needs to search across a set of PDFs and still get page/snippet/highlight proof back
    - `page_objects` when the agent needs to inspect extracted procedures, sections, figures, or tables on one page
    - `search_objects` when the agent wants to browse extracted evidence objects before doing a final retrieval pass
 
@@ -722,6 +732,15 @@ PYTHONPATH=src python3 examples/agent_workflow.py \
   --query "how do I configure wake on lan" \
   --object-query "wake on lan" \
   --object-type section
+```
+
+Example: run multi-PDF retrieval across a corpus set:
+
+```bash
+PYTHONPATH=src python3 examples/multi_pdf_workflow.py \
+  --corpus generated/manual-a.json \
+  --corpus generated/manual-b.json \
+  --query "where is wake on lan discussed"
 ```
 
 Example tool result shape:

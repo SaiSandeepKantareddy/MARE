@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from mare.api import load_corpus, load_pdf
+from mare.api import load_corpora, load_corpus, load_pdf
 from mare.integrations import hits_to_evidence_payload
 
 
@@ -50,6 +50,19 @@ def query_corpus_tool(corpus_path: str, query: str, top_k: int = 3) -> dict[str,
     hits = app.retrieve(query=query, top_k=top_k)
     payload = hits_to_evidence_payload(query=query, hits=hits)
     payload.update({"corpus_path": str(corpus_path)})
+    return payload
+
+
+def query_corpora_tool(corpus_paths: list[str], query: str, top_k: int = 3) -> dict[str, Any]:
+    app = load_corpora(corpus_paths=corpus_paths)
+    hits = app.retrieve(query=query, top_k=top_k)
+    payload = hits_to_evidence_payload(query=query, hits=hits)
+    payload.update(
+        {
+            "corpus_paths": [str(path) for path in corpus_paths],
+            "corpus_count": len(corpus_paths),
+        }
+    )
     return payload
 
 
@@ -142,6 +155,12 @@ def create_mcp_server():
         return query_corpus_tool(corpus_path=corpus_path, query=query, top_k=top_k)
 
     @server.tool()
+    def query_corpora(corpus_paths: list[str], query: str, top_k: int = 3) -> dict[str, Any]:
+        """Query multiple MARE corpora together and return the best grounded evidence across PDFs."""
+
+        return query_corpora_tool(corpus_paths=corpus_paths, query=query, top_k=top_k)
+
+    @server.tool()
     def page_objects(corpus_path: str, doc_id: str, limit: int = 10) -> dict[str, Any]:
         """List extracted document objects for a page/document entry inside a MARE corpus."""
 
@@ -181,6 +200,7 @@ __all__ = [
     "ingest_pdf_tool",
     "main",
     "page_objects_tool",
+    "query_corpora_tool",
     "query_corpus_tool",
     "query_pdf_tool",
     "search_objects_tool",
