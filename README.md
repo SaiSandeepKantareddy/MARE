@@ -928,7 +928,8 @@ The Python package is where developers get full control over:
 - framework integrations
 - evaluation harnesses
 
-For non-text objects such as tables and figures, MARE now falls back to region-level page highlighting when exact text-span highlighting is not available yet.
+For non-text objects such as tables and figures, MARE now falls back to object-region highlighting when exact text-span highlighting is not available yet.
+Newly ingested corpora capture richer line-span metadata for built-in objects, and parser adapters such as Surya can pass bounding boxes directly, so highlight precision is tighter on fresh corpora than on older generated artifacts.
 
 The technical retrieval plan is hidden under a `Debug details` expander so the default experience stays user-facing.
 

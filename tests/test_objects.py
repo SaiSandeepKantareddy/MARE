@@ -62,6 +62,9 @@ def test_extract_document_objects_extracts_table_blocks_with_metadata() -> None:
     assert "Model comparison" in tables[0].content
     assert tables[0].metadata["label"] == "Table 2"
     assert int(tables[0].metadata["columns_estimate"]) >= 3
+    assert tables[0].metadata["line_start"] == "1"
+    assert tables[0].metadata["line_end"] == "4"
+    assert tables[0].metadata["line_total"] == "4"
 
 
 def test_extract_document_objects_extracts_figure_caption_blocks_with_metadata() -> None:
@@ -75,3 +78,21 @@ def test_extract_document_objects_extracts_figure_caption_blocks_with_metadata()
     assert len(figures) == 1
     assert "Dashed arrows" in figures[0].content
     assert figures[0].metadata["label"] == "Figure 3"
+    assert figures[0].metadata["line_start"] == "1"
+    assert figures[0].metadata["line_end"] == "2"
+
+
+def test_extract_document_objects_extracts_line_aware_sections() -> None:
+    text = """
+    Introduction
+    We propose a retrieval system for PDF evidence.
+    It returns page, snippet, and highlight proof.
+    Results
+    The built-in path performs strongly on manuals.
+    """
+    objects = extract_document_objects(text, doc_id="doc-1", page=2)
+    sections = [obj for obj in objects if obj.object_type == ObjectType.SECTION]
+
+    assert sections
+    assert sections[0].metadata["line_start"] == "1"
+    assert sections[0].metadata["line_end"] == "3"

@@ -32,6 +32,16 @@ def _region_hint(index: int, total: int) -> str:
     return "bottom"
 
 
+def _line_metadata(start_index: int, end_index: int, total_lines: int) -> dict[str, str]:
+    metadata = {
+        "line_start": str(start_index + 1),
+        "line_end": str(end_index + 1),
+        "line_total": str(total_lines),
+    }
+    metadata["region_hint"] = _region_hint(start_index, total_lines)
+    return metadata
+
+
 def _estimate_columns(line: str) -> int:
     if "|" in line:
         return max(2, len([part for part in line.split("|") if part.strip()]))
@@ -202,8 +212,8 @@ def _extract_figures(page_text: str, doc_id: str, page: int) -> list[DocumentObj
                     content=_normalize(" ".join(block)),
                     metadata={
                         "label": label.title(),
-                        "region_hint": _region_hint(idx - 1, len(lines)),
                         "block_lines": str(len(block)),
+                        **_line_metadata(idx - 1, idx + len(block) - 2, len(lines)),
                     },
                 )
             )
@@ -263,9 +273,9 @@ def _extract_tables(page_text: str, doc_id: str, page: int) -> list[DocumentObje
                     content=content,
                     metadata={
                         "label": label,
-                        "region_hint": _region_hint(start_index, len(lines)),
                         "columns_estimate": str(max_columns),
                         "block_lines": str(len(block)),
+                        **_line_metadata(start_index, index - 1, len(lines)),
                     },
                 )
             )
@@ -292,6 +302,32 @@ def _extract_tables(page_text: str, doc_id: str, page: int) -> list[DocumentObje
 
 
 def _extract_sections(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
+    lines = _split_lines(page_text)
+    if lines:
+        chunk_size = 3
+        objects: list[DocumentObject] = []
+        for idx in range(0, len(lines), chunk_size):
+            block = lines[idx : idx + chunk_size]
+            content = _normalize(" ".join(block))
+            if len(content) < 30:
+                continue
+            chunk_no = (idx // chunk_size) + 1
+            objects.append(
+                DocumentObject(
+                    object_id=f"{doc_id}:section:{page}:{chunk_no}",
+                    doc_id=doc_id,
+                    page=page,
+                    object_type=ObjectType.SECTION,
+                    content=content,
+                    metadata={
+                        "block_lines": str(len(block)),
+                        **_line_metadata(idx, idx + len(block) - 1, len(lines)),
+                    },
+                )
+            )
+        if objects:
+            return objects
+
     sentences = _split_sentences(page_text)
     if not sentences:
         return []
@@ -310,6 +346,7 @@ def _extract_sections(page_text: str, doc_id: str, page: int) -> list[DocumentOb
                 page=page,
                 object_type=ObjectType.SECTION,
                 content=content,
+                metadata={"region_hint": _region_hint(idx, len(sentences))},
             )
         )
     return objects
