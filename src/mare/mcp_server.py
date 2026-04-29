@@ -224,6 +224,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable the FastMCP startup banner",
     )
+    parser.add_argument(
+        "--allow-host",
+        action="append",
+        default=[],
+        help="Additional allowed Host header pattern for remote MCP traffic, e.g. abc123.ngrok-free.app:*",
+    )
+    parser.add_argument(
+        "--allow-origin",
+        action="append",
+        default=[],
+        help="Additional allowed Origin pattern for remote MCP traffic, e.g. https://abc123.ngrok-free.app",
+    )
+    parser.add_argument(
+        "--disable-dns-rebinding-protection",
+        action="store_true",
+        help="Disable FastMCP host/origin protection. Use only for controlled local testing.",
+    )
     return parser
 
 
@@ -256,6 +273,16 @@ def main(argv: list[str] | None = None) -> None:
         settings.streamable_http_path = args.path.rstrip("/") or "/mcp"
         settings.sse_path = args.sse_path.rstrip("/") or "/sse"
         settings.message_path = args.message_path if args.message_path.endswith("/") else f"{args.message_path}/"
+        transport_security = getattr(settings, "transport_security", None)
+        if transport_security is not None:
+            if args.disable_dns_rebinding_protection:
+                transport_security.enable_dns_rebinding_protection = False
+            for host_pattern in args.allow_host:
+                if host_pattern not in transport_security.allowed_hosts:
+                    transport_security.allowed_hosts.append(host_pattern)
+            for origin_pattern in args.allow_origin:
+                if origin_pattern not in transport_security.allowed_origins:
+                    transport_security.allowed_origins.append(origin_pattern)
     if transport == "stdio":
         invoke_run(transport="stdio", show_banner=show_banner)
         return

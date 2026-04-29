@@ -213,6 +213,15 @@ def test_main_runs_http_transport_with_expected_defaults(monkeypatch) -> None:
                     "streamable_http_path": "/mcp",
                     "sse_path": "/sse",
                     "message_path": "/messages/",
+                    "transport_security": type(
+                        "TransportSecurity",
+                        (),
+                        {
+                            "enable_dns_rebinding_protection": True,
+                            "allowed_hosts": ["127.0.0.1:*"],
+                            "allowed_origins": ["http://127.0.0.1:*"],
+                        },
+                    )(),
                 },
             )()
 
@@ -235,3 +244,55 @@ def test_main_runs_http_transport_with_expected_defaults(monkeypatch) -> None:
     assert fake_server.settings.host == "0.0.0.0"
     assert fake_server.settings.port == 9000
     assert fake_server.settings.streamable_http_path == "/mcp"
+
+
+def test_main_extends_allowed_hosts_and_origins(monkeypatch) -> None:
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    class _FakeServer:
+        def __init__(self) -> None:
+            self.calls = []
+            self.settings = type(
+                "Settings",
+                (),
+                {
+                    "host": "127.0.0.1",
+                    "port": 8000,
+                    "streamable_http_path": "/mcp",
+                    "sse_path": "/sse",
+                    "message_path": "/messages/",
+                    "transport_security": type(
+                        "TransportSecurity",
+                        (),
+                        {
+                            "enable_dns_rebinding_protection": True,
+                            "allowed_hosts": ["127.0.0.1:*"],
+                            "allowed_origins": ["http://127.0.0.1:*"],
+                        },
+                    )(),
+                },
+            )()
+
+        def run(self, transport, mount_path=None) -> None:
+            self.calls.append({"transport": transport, "mount_path": mount_path})
+
+    fake_server = _FakeServer()
+    monkeypatch.setattr("sys.stdin", _TTY())
+    monkeypatch.setattr("sys.stdout", _TTY())
+    monkeypatch.setattr("mare.mcp_server.create_mcp_server", lambda: fake_server)
+
+    main(
+        [
+            "--transport",
+            "http",
+            "--allow-host",
+            "demo.ngrok-free.app:*",
+            "--allow-origin",
+            "https://demo.ngrok-free.app",
+        ]
+    )
+
+    assert "demo.ngrok-free.app:*" in fake_server.settings.transport_security.allowed_hosts
+    assert "https://demo.ngrok-free.app" in fake_server.settings.transport_security.allowed_origins
