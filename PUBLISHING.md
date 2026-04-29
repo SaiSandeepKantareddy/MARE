@@ -5,11 +5,40 @@ This repo is set up for both local package builds and GitHub Actions based PyPI 
 ## Before the first release
 
 1. Create or verify the PyPI project named `mare-retrieval`.
-2. In PyPI, configure trusted publishing for this GitHub repository.
+2. In PyPI, configure trusted publishing for this GitHub repository with these exact values:
+   - Owner: `mare-retrieval`
+   - Repository: `MARE`
+   - Workflow file: `publish.yml`
+   - Environment: `pypi`
 3. In GitHub, keep the `publish.yml` workflow enabled.
 4. Bump the version in:
    - `pyproject.toml`
    - `setup.py`
+
+### Trusted publishing troubleshooting
+
+If PyPI returns:
+
+```text
+invalid-publisher: valid token, but no corresponding publisher
+```
+
+the GitHub workflow claims did not match the trusted publisher entry on PyPI.
+
+For this repo, the expected claims are:
+
+- `repository`: `mare-retrieval/MARE`
+- `workflow_ref`: `mare-retrieval/MARE/.github/workflows/publish.yml@refs/tags/<tag>`
+- `environment`: `pypi`
+
+The most common fix is to open the `mare-retrieval` project on PyPI and update the trusted publisher so it matches:
+
+- owner/org: `mare-retrieval`
+- repository: `MARE`
+- workflow: `publish.yml`
+- environment: `pypi`
+
+After updating the PyPI trusted publisher, rerun the failed GitHub Actions publish job or trigger the workflow manually.
 
 ## Local release check
 
