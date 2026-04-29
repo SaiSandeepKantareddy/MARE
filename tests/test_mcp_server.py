@@ -185,11 +185,42 @@ def test_main_exits_with_helpful_message_when_run_interactively(monkeypatch) -> 
     monkeypatch.setattr("sys.stdout", _TTY())
 
     try:
-        main()
+        main([])
     except SystemExit as exc:
         message = str(exc)
     else:
         raise AssertionError("Expected main() to exit when launched interactively.")
 
-    assert "stdio MCP server" in message
+    assert "defaults to stdio" in message
+    assert "mare-workflow" in message
     assert "examples/mcp_stdio_config.json" in message
+
+
+def test_main_runs_http_transport_with_expected_defaults(monkeypatch) -> None:
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    class _FakeServer:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, **kwargs) -> None:
+            self.calls.append(kwargs)
+
+    fake_server = _FakeServer()
+    monkeypatch.setattr("sys.stdin", _TTY())
+    monkeypatch.setattr("sys.stdout", _TTY())
+    monkeypatch.setattr("mare.mcp_server.create_mcp_server", lambda: fake_server)
+
+    main(["--transport", "http", "--host", "0.0.0.0", "--port", "9000"])
+
+    assert fake_server.calls == [
+        {
+            "transport": "http",
+            "host": "0.0.0.0",
+            "port": 9000,
+            "path": "/mcp/",
+            "show_banner": True,
+        }
+    ]

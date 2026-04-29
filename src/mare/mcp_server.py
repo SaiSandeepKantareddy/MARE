@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 from typing import Any
@@ -187,19 +188,80 @@ def create_mcp_server():
     return server
 
 
-def main() -> None:
-    if sys.stdin.isatty() and sys.stdout.isatty():
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the MARE MCP server. Use stdio when launched by an MCP client, or HTTP/SSE when you need a "
+            "remote MCP endpoint for enterprise or ChatGPT/API integrations."
+        )
+    )
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "http", "sse", "streamable-http"),
+        default="stdio",
+        help="Transport to serve. Default: stdio. Use http for a remote MCP endpoint.",
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="Bind host for HTTP/SSE transports")
+    parser.add_argument("--port", type=int, default=8000, help="Bind port for HTTP/SSE transports")
+    parser.add_argument(
+        "--path",
+        default="/mcp/",
+        help="Endpoint path for HTTP transport. Default: /mcp/",
+    )
+    parser.add_argument(
+        "--message-path",
+        default="/messages/",
+        help="Message path for SSE transport. Default: /messages/",
+    )
+    parser.add_argument(
+        "--sse-path",
+        default="/sse/",
+        help="Connection path for SSE transport. Default: /sse/",
+    )
+    parser.add_argument(
+        "--no-banner",
+        action="store_true",
+        help="Disable the FastMCP startup banner",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_arg_parser().parse_args(argv)
+    if args.transport == "stdio" and sys.stdin.isatty() and sys.stdout.isatty():
         raise SystemExit(
-            "mare-mcp is a stdio MCP server, so it should be launched by an MCP-capable client rather than run "
+            "mare-mcp defaults to stdio, which is meant to be launched by an MCP-capable client rather than run "
             "interactively in a shell.\n\n"
-            "Use the example client config in examples/mcp_stdio_config.json, or run MARE directly through the "
-            "Python API / workflow examples if you want a human-facing CLI."
+            "For a human-facing local evaluation flow, use `mare-workflow` or `mare-ui`.\n"
+            "For a remote MCP endpoint, run `mare-mcp --transport http --host 0.0.0.0 --port 8000`.\n"
+            "For local MCP clients, use the example config in examples/mcp_stdio_config.json."
         )
     server = create_mcp_server()
     run = getattr(server, "run", None)
     if run is None:
         raise RuntimeError("The installed MCP package does not expose `FastMCP.run()`. Please upgrade `mcp`.")
-    run()
+    transport = args.transport
+    show_banner = not args.no_banner
+    if transport == "stdio":
+        run(transport="stdio", show_banner=show_banner)
+        return
+    if transport in ("http", "streamable-http"):
+        run(
+            transport="http",
+            host=args.host,
+            port=args.port,
+            path=args.path,
+            show_banner=show_banner,
+        )
+        return
+    run(
+        transport="sse",
+        host=args.host,
+        port=args.port,
+        message_path=args.message_path,
+        sse_path=args.sse_path,
+        show_banner=show_banner,
+    )
 
 
 __all__ = [

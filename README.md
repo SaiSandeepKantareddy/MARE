@@ -658,13 +658,27 @@ Install:
 pip install "mare-retrieval[mcp]"
 ```
 
-Run:
+Run with a local MCP client over stdio:
 
 ```bash
 mare-mcp
 ```
 
 Note: `mare-mcp` is a stdio MCP server. It is meant to be launched by an MCP-capable client over stdin/stdout, not interacted with directly in a shell prompt.
+
+Run as a remote MCP endpoint over HTTP:
+
+```bash
+mare-mcp --transport http --host 0.0.0.0 --port 8000
+```
+
+That serves a remote MCP endpoint at:
+
+```text
+http://127.0.0.1:8000/mcp/
+```
+
+This is the mode to use when you want to deploy MARE behind a load balancer, connect it to ChatGPT/API MCP tools, or evaluate it like an enterprise service.
 
 If you want a human-friendly local evaluation flow with the same agent-style steps, use:
 
@@ -695,6 +709,12 @@ Or point an MCP-capable client at the included example stdio config:
 ```
 
 See [examples/mcp_stdio_config.json](/Users/saisandeepkantareddy/Downloads/MARE/examples/mcp_stdio_config.json).
+
+For remote MCP clients, use the HTTP endpoint directly:
+
+```text
+http://your-host:8000/mcp/
+```
 
 The MCP server exposes focused tools for the evidence layer:
 
