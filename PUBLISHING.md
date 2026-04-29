@@ -43,10 +43,12 @@ It will publish when:
 ## Recommended release flow
 
 1. Update version numbers.
-2. Run the local release check.
-3. Commit and push.
-4. Create a GitHub release for that version.
-5. Let GitHub Actions publish to PyPI.
+2. Write a release notes file such as `RELEASE_NOTES_0.4.0.md`.
+3. Skim the README install and feature sections so the public story matches the release.
+4. Run the local release check.
+5. Commit and push.
+6. Create a GitHub release for that version using the release notes file.
+7. Let GitHub Actions publish to PyPI.
 
 ## Install commands after release
 
