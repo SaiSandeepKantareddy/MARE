@@ -242,26 +242,20 @@ def main(argv: list[str] | None = None) -> None:
         raise RuntimeError("The installed MCP package does not expose `FastMCP.run()`. Please upgrade `mcp`.")
     transport = args.transport
     show_banner = not args.no_banner
+    settings = getattr(server, "settings", None)
+    if settings is not None:
+        settings.host = args.host
+        settings.port = args.port
+        settings.streamable_http_path = args.path.rstrip("/") or "/mcp"
+        settings.sse_path = args.sse_path.rstrip("/") or "/sse"
+        settings.message_path = args.message_path if args.message_path.endswith("/") else f"{args.message_path}/"
     if transport == "stdio":
         run(transport="stdio", show_banner=show_banner)
         return
     if transport in ("http", "streamable-http"):
-        run(
-            transport="http",
-            host=args.host,
-            port=args.port,
-            path=args.path,
-            show_banner=show_banner,
-        )
+        run(transport="streamable-http", show_banner=show_banner)
         return
-    run(
-        transport="sse",
-        host=args.host,
-        port=args.port,
-        message_path=args.message_path,
-        sse_path=args.sse_path,
-        show_banner=show_banner,
-    )
+    run(transport="sse", show_banner=show_banner)
 
 
 __all__ = [

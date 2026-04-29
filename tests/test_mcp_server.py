@@ -204,6 +204,17 @@ def test_main_runs_http_transport_with_expected_defaults(monkeypatch) -> None:
     class _FakeServer:
         def __init__(self) -> None:
             self.calls = []
+            self.settings = type(
+                "Settings",
+                (),
+                {
+                    "host": "127.0.0.1",
+                    "port": 8000,
+                    "streamable_http_path": "/mcp",
+                    "sse_path": "/sse",
+                    "message_path": "/messages/",
+                },
+            )()
 
         def run(self, **kwargs) -> None:
             self.calls.append(kwargs)
@@ -217,10 +228,10 @@ def test_main_runs_http_transport_with_expected_defaults(monkeypatch) -> None:
 
     assert fake_server.calls == [
         {
-            "transport": "http",
-            "host": "0.0.0.0",
-            "port": 9000,
-            "path": "/mcp/",
+            "transport": "streamable-http",
             "show_banner": True,
         }
     ]
+    assert fake_server.settings.host == "0.0.0.0"
+    assert fake_server.settings.port == 9000
+    assert fake_server.settings.streamable_http_path == "/mcp"
