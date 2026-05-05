@@ -22,6 +22,25 @@ The bigger goal is simple:
 
 MARE is meant to sit underneath agent logic and application logic as the PDF evidence layer.
 
+## One product, four ways to use it
+
+MARE should feel like one product, not a pile of commands.
+
+Start with whichever mode fits you:
+
+- `mare-ui`
+  - the visual playground
+  - best for seeing the product click in seconds
+- `mare-chat`
+  - the simple document agent
+  - best for asking questions over a folder of PDFs
+- `mare-workflow`
+  - the structured terminal workflow
+  - best for backend and enterprise evaluation
+- `mare-mcp`
+  - the integration layer
+  - best for agent platforms, apps, and tool use
+
 ## Start here
 
 If you are new to MARE, use this order:
@@ -64,6 +83,13 @@ Then open:
 http://localhost:8501
 ```
 
+Upload a PDF, ask a concrete question, and MARE will show:
+
+- the source file
+- the best page
+- the exact snippet
+- the highlighted proof
+
 Ask a PDF a question:
 
 ```bash
@@ -89,6 +115,43 @@ That should already show the core product value:
 - highlight path
 - evidence object type
 - retrieval reason
+
+## Two main entrypoints
+
+If you only remember two things, make them these:
+
+### 1. `mare-ui`
+
+For most new users, this is the best starting point.
+
+```bash
+pip install "mare-retrieval[ui]"
+mare-ui
+```
+
+What you get:
+
+- upload PDFs
+- ask questions
+- inspect highlighted evidence
+- compare results visually
+- understand the product fast
+
+### 2. `mare-chat`
+
+This is the simplest “agent-like” local experience.
+
+```bash
+mare-chat --folder ./docs
+```
+
+What you get:
+
+- ask questions over a folder of PDFs
+- see source file + page + snippet + highlight path
+- stay in a local terminal loop
+
+That’s the closest current experience to “Cursor for PDFs,” while still keeping MARE grounded in evidence retrieval instead of vague answer generation.
 
 ### Where generated files go
 
