@@ -48,6 +48,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
+            "mare-chat=mare.chat:main",
             "mare-demo=mare.demo:main",
             "mare-eval=mare.eval:main",
             "mare-ingest=mare.ingest:main",

@@ -29,10 +29,13 @@ If you are new to MARE, use this order:
 1. `mare-ui`
    - best for visual proof, screenshots, and product demos
    - easiest way to understand MARE in seconds
-2. `mare-workflow`
+2. `mare-chat`
+   - best for a simple “document agent” experience over a folder of PDFs
+   - gives you answers with file, page, snippet, and highlight paths
+3. `mare-workflow`
    - fastest way to see what MARE returns in a terminal
    - best for backend teams and enterprise evaluation
-3. `mare-mcp`
+4. `mare-mcp`
    - best when you want another client, agent, or app platform to call MARE as a tool
 
 ### First 3 minutes
@@ -73,6 +76,12 @@ Run the fuller agent-style workflow:
 mare-workflow --pdf manual.pdf --query "how do I connect the AC adapter"
 ```
 
+Or use the simple chat-style interface over a folder of PDFs:
+
+```bash
+mare-chat --folder ./docs
+```
+
 That should already show the core product value:
 
 - best page
@@ -100,6 +109,7 @@ You can see those paths directly in:
 | Interface | Best for | What you get |
 | --- | --- | --- |
 | `mare-ask` | fastest first test | best page, snippet, image paths |
+| `mare-chat` | simple document-agent loop | ask questions over a folder of PDFs, get file/page/snippet/highlight |
 | `mare-workflow` | terminal evaluation and agent-style output | corpus summary, object search, grounded retrieval |
 | `mare-ui` | visual exploration | upload PDFs, inspect highlights, compare results |
 | `mare-mcp` | integrations | tool server for MCP-capable clients and app platforms |
@@ -245,6 +255,12 @@ Recommended next command:
 mare-workflow --pdf manual.pdf --query "how do I connect the AC adapter"
 ```
 
+Or start a simple document chat session:
+
+```bash
+mare-chat --folder ./docs
+```
+
 What each install path gives you:
 
 - `git clone` by itself does not install anything. It only gives you the source tree.
@@ -359,6 +375,18 @@ If you want a more complete picture, including corpus summary and object search,
 ```bash
 mare-workflow --pdf "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf" --query "partially reinstall the set screws if they fall out"
 ```
+
+If you want the most agent-like local experience without another platform, use:
+
+```bash
+mare-chat --folder .
+```
+
+Inside `mare-chat`, ask questions naturally or use:
+
+- `:sources`
+- `:json <question>`
+- `:quit`
 
 If the PDF filename is awkward, rename it first:
 
