@@ -22,22 +22,32 @@ The bigger goal is simple:
 
 MARE is meant to sit underneath agent logic and application logic as the PDF evidence layer.
 
+## One product, one command
+
+The simplest way to approach MARE now is:
+
+```bash
+mare --help
+```
+
+That gives you one front door into the product.
+
 ## One product, four ways to use it
 
 MARE should feel like one product, not a pile of commands.
 
 Start with whichever mode fits you:
 
-- `mare-ui`
+- `mare ui`
   - the visual playground
   - best for seeing the product click in seconds
-- `mare-chat`
+- `mare chat`
   - the simple document agent
   - best for asking questions over a folder of PDFs
-- `mare-workflow`
+- `mare workflow`
   - the structured terminal workflow
   - best for backend and enterprise evaluation
-- `mare-mcp`
+- `mare mcp`
   - the integration layer
   - best for agent platforms, apps, and tool use
 
@@ -74,7 +84,7 @@ pip install "mare-retrieval[ui]"
 Launch the UI:
 
 ```bash
-mare-ui
+mare ui
 ```
 
 Then open:
@@ -93,19 +103,19 @@ Upload a PDF, ask a concrete question, and MARE will show:
 Ask a PDF a question:
 
 ```bash
-mare-ask manual.pdf "how do I connect the AC adapter"
+mare ask manual.pdf "how do I connect the AC adapter"
 ```
 
 Run the fuller agent-style workflow:
 
 ```bash
-mare-workflow --pdf manual.pdf --query "how do I connect the AC adapter"
+mare workflow --pdf manual.pdf --query "how do I connect the AC adapter"
 ```
 
 Or use the simple chat-style interface over a folder of PDFs:
 
 ```bash
-mare-chat --folder ./docs
+mare chat --folder ./docs
 ```
 
 That should already show the core product value:
@@ -126,7 +136,7 @@ For most new users, this is the best starting point.
 
 ```bash
 pip install "mare-retrieval[ui]"
-mare-ui
+mare ui
 ```
 
 What you get:
@@ -142,7 +152,7 @@ What you get:
 This is the simplest “agent-like” local experience.
 
 ```bash
-mare-chat --folder ./docs
+mare chat --folder ./docs
 ```
 
 What you get:
@@ -163,19 +173,19 @@ When MARE ingests a PDF, it typically writes:
 
 You can see those paths directly in:
 
-- `mare-ask`
-- `mare-workflow`
-- the Streamlit playground (`mare-ui`)
+- `mare ask`
+- `mare workflow`
+- the Streamlit playground (`mare ui`)
 
 ### Which interface should I use?
 
 | Interface | Best for | What you get |
 | --- | --- | --- |
-| `mare-ask` | fastest first test | best page, snippet, image paths |
-| `mare-chat` | simple document-agent loop | ask questions over a folder of PDFs, get file/page/snippet/highlight |
-| `mare-workflow` | terminal evaluation and agent-style output | corpus summary, object search, grounded retrieval |
-| `mare-ui` | visual exploration | upload PDFs, inspect highlights, compare results |
-| `mare-mcp` | integrations | tool server for MCP-capable clients and app platforms |
+| `mare ask` | fastest first test | best page, snippet, image paths |
+| `mare chat` | simple document-agent loop | ask questions over a folder of PDFs, get file/page/snippet/highlight |
+| `mare workflow` | terminal evaluation and agent-style output | corpus summary, object search, grounded retrieval |
+| `mare ui` | visual exploration | upload PDFs, inspect highlights, compare results |
+| `mare mcp` | integrations | tool server for MCP-capable clients and app platforms |
 
 It started from the broader multimodal retrieval direction highlighted by the IRPAPERS paper, but the current package is intentionally focused on a more concrete and reliable use case: local PDF retrieval with visible evidence that agents and developers can build on.
 
