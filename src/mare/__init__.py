@@ -1,9 +1,11 @@
 """MARE: Modality-Aware Retrieval Engine."""
 
-from .api import MAREApp, load_corpora, load_corpus, load_pdf
+from .api import MAREApp, load_corpora, load_corpus, load_document, load_pdf
 from .engine import MAREngine
 from .eval import EvalCase, EvalCaseResult, EvalSummary, evaluate_cases, evaluate_corpus, load_eval_cases
 from .extensions import (
+    BuiltinDocxParser,
+    BuiltinTextParser,
     BuiltinPDFParser,
     DoclingParser,
     FastEmbedReranker,
@@ -24,9 +26,12 @@ from .extensions import (
 )
 from .fusion import WeightedScoreFusion
 from .integrations import (
+    create_langchain_tool,
     create_langgraph_tool,
     create_langchain_retriever,
+    create_llamaindex_tool,
     create_llamaindex_retriever,
+    build_grounded_summary_payload,
     hits_to_evidence_payload,
     hit_to_langchain_document,
     hit_to_llamaindex_node,
@@ -53,6 +58,12 @@ def ingest_pdf_tool(*args, **kwargs):
     return _ingest_pdf_tool(*args, **kwargs)
 
 
+def ingest_document_tool(*args, **kwargs):
+    from .mcp_server import ingest_document_tool as _ingest_document_tool
+
+    return _ingest_document_tool(*args, **kwargs)
+
+
 def page_objects_tool(*args, **kwargs):
     from .mcp_server import page_objects_tool as _page_objects_tool
 
@@ -77,6 +88,12 @@ def query_pdf_tool(*args, **kwargs):
     return _query_pdf_tool(*args, **kwargs)
 
 
+def query_document_tool(*args, **kwargs):
+    from .mcp_server import query_document_tool as _query_document_tool
+
+    return _query_document_tool(*args, **kwargs)
+
+
 def search_objects_tool(*args, **kwargs):
     from .mcp_server import search_objects_tool as _search_objects_tool
 
@@ -84,8 +101,13 @@ def search_objects_tool(*args, **kwargs):
 
 __all__ = [
     "BuiltinPDFParser",
+    "BuiltinDocxParser",
+    "BuiltinTextParser",
+    "build_grounded_summary_payload",
+    "create_langchain_tool",
     "create_langgraph_tool",
     "create_langchain_retriever",
+    "create_llamaindex_tool",
     "create_llamaindex_retriever",
     "create_mcp_server",
     "describe_corpus_tool",
@@ -103,6 +125,7 @@ __all__ = [
     "hit_to_langchain_document",
     "hit_to_llamaindex_node",
     "ingest_pdf_tool",
+    "ingest_document_tool",
     "IdentityReranker",
     "KeywordBoostReranker",
     "get_parser",
@@ -111,6 +134,7 @@ __all__ = [
     "load_corpus",
     "load_corpora",
     "load_eval_cases",
+    "load_document",
     "load_pdf",
     "MAREConfig",
     "MAREApp",
@@ -121,6 +145,7 @@ __all__ = [
     "query_corpora_tool",
     "QueryPlan",
     "query_corpus_tool",
+    "query_document_tool",
     "query_pdf_tool",
     "QdrantIndexer",
     "QdrantHybridRetriever",

@@ -3,13 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from mare.mcp_server import (
+    _asset_url,
+    _attach_remote_asset_urls,
+    _normalize_media_path,
+    _normalize_public_base_url,
     describe_corpus_tool,
+    ingest_document_tool,
     ingest_pdf_tool,
     ingest_pdf_url_tool,
     main,
     page_objects_tool,
     query_corpora_tool,
     query_corpus_tool,
+    query_document_tool,
     query_pdf_tool,
     query_pdf_url_tool,
     search_objects_tool,
@@ -20,6 +26,8 @@ from mare.types import Document, DocumentObject, Modality, ObjectType, Retrieval
 class _FakeApp:
     def __init__(self, *, corpus_path: str = "generated/manual.json", source_pdf: str = "manual.pdf") -> None:
         self.corpus_path = Path(corpus_path)
+        self.source_document = Path(source_pdf)
+        self.source_documents = [self.source_document]
         self.source_pdf = Path(source_pdf)
         self.documents = [
             Document(
@@ -55,7 +63,21 @@ class _FakeApp:
                 object_id="doc-1:procedure:1",
                 object_type="procedure",
                 metadata={"source": "manual.pdf"},
-            )
+            ),
+            RetrievalHit(
+                doc_id="doc-2",
+                title="Guide",
+                page=12,
+                modality=Modality.TEXT,
+                score=0.72,
+                reason="Matched related setup wording in the guide.",
+                snippet="Plug the AC adapter into the wall outlet before powering on.",
+                page_image_path="generated/guide/page-12.png",
+                highlight_image_path="generated/guide/highlight-12.png",
+                object_id="doc-2:procedure:1",
+                object_type="procedure",
+                metadata={"source": "guide.docx"},
+            ),
         ][:top_k]
 
     def get_page_objects(self, doc_id: str, limit: int | None = None):
@@ -121,14 +143,77 @@ def test_ingest_pdf_tool_returns_summary(monkeypatch) -> None:
     assert payload["document_count"] == 1
 
 
+def test_ingest_document_tool_returns_summary(monkeypatch) -> None:
+    monkeypatch.setattr("mare.mcp_server.load_document", lambda **kwargs: _FakeApp())
+
+    payload = ingest_document_tool("guide.md", parser="builtin")
+
+    assert payload["document_path"] == "guide.md"
+    assert payload["corpus_path"].endswith("generated/manual.json")
+    assert payload["document_count"] == 1
+
+
 def test_query_pdf_tool_returns_evidence_payload(monkeypatch) -> None:
     monkeypatch.setattr("mare.mcp_server.load_pdf", lambda **kwargs: _FakeApp())
 
-    payload = query_pdf_tool("manual.pdf", "connect the adapter", top_k=1)
+    payload = query_pdf_tool("manual.pdf", "connect the adapter", top_k=2)
 
     assert payload["query"] == "connect the adapter"
     assert payload["results"][0]["object_type"] == "procedure"
     assert payload["results"][0]["highlight_image_path"].endswith("highlight-10.png")
+    assert payload["proof_assets"][0]["highlight_image_path"].endswith("highlight-10.png")
+    assert payload["primary_proof_asset"]["page"] == 10
+    assert payload["best_evidence"]["citation"] == "manual.pdf | page 10"
+    assert payload["best_evidence"]["page"] == 10
+    assert payload["proof_links"]["page_image_url"] == ""
+    assert payload["proof_links"]["highlight_image_url"] == ""
+    assert payload["comparison"][1]["citation"] == "guide.docx | page 12"
+    assert payload["summary"]["overview"] == "Found 2 grounded results across 2 sources."
+
+
+def test_query_document_tool_returns_evidence_payload(monkeypatch) -> None:
+    monkeypatch.setattr("mare.mcp_server.load_document", lambda **kwargs: _FakeApp())
+
+    payload = query_document_tool("guide.md", "connect the adapter", top_k=1)
+
+    assert payload["query"] == "connect the adapter"
+    assert payload["document_path"] == "guide.md"
+    assert payload["results"][0]["object_type"] == "procedure"
+
+
+def test_attach_remote_asset_urls_adds_public_urls(monkeypatch) -> None:
+    monkeypatch.setattr("mare.mcp_server._PUBLIC_BASE_URL", "https://demo.ngrok-free.app")
+    monkeypatch.setattr("mare.mcp_server._MEDIA_PATH", "/media")
+    payload = {
+        "results": [
+            {
+                "page_image_path": "generated/manual/page-10.png",
+                "highlight_image_path": "generated/manual/highlight-10.png",
+            }
+        ]
+    }
+
+    updated = _attach_remote_asset_urls(payload)
+
+    assert updated["results"][0]["page_image_url"].endswith("/media/generated/manual/page-10.png")
+    assert updated["results"][0]["highlight_image_url"].endswith("/media/generated/manual/highlight-10.png")
+    assert updated["proof_assets"][0]["page_image_url"].endswith("/media/generated/manual/page-10.png")
+    assert updated["primary_proof_asset"]["highlight_image_url"].endswith("/media/generated/manual/highlight-10.png")
+    assert updated["best_evidence"]["page_image_url"].endswith("/media/generated/manual/page-10.png")
+    assert updated["proof_links"]["page_image_url"].endswith("/media/generated/manual/page-10.png")
+    assert updated["proof_links"]["highlight_image_url"].endswith("/media/generated/manual/highlight-10.png")
+
+
+def test_asset_url_returns_empty_without_public_base(monkeypatch) -> None:
+    monkeypatch.setattr("mare.mcp_server._PUBLIC_BASE_URL", "")
+    monkeypatch.setattr("mare.mcp_server._MEDIA_PATH", "/media")
+
+    assert _asset_url("generated/manual/page-10.png") == ""
+
+
+def test_normalize_helpers_trim_paths() -> None:
+    assert _normalize_public_base_url("https://demo.ngrok-free.app/") == "https://demo.ngrok-free.app"
+    assert _normalize_media_path("media/") == "/media"
 
 
 def test_ingest_pdf_url_tool_downloads_then_ingests(monkeypatch, tmp_path: Path) -> None:
@@ -158,10 +243,11 @@ def test_query_pdf_url_tool_downloads_then_queries(monkeypatch, tmp_path: Path) 
 def test_query_corpus_tool_returns_evidence_payload(monkeypatch) -> None:
     monkeypatch.setattr("mare.mcp_server.load_corpus", lambda **kwargs: _FakeApp())
 
-    payload = query_corpus_tool("generated/manual.json", "connect the adapter", top_k=1)
+    payload = query_corpus_tool("generated/manual.json", "connect the adapter", top_k=2)
 
     assert payload["corpus_path"] == "generated/manual.json"
     assert payload["results"][0]["page"] == 10
+    assert payload["comparison"][0]["source_document"] == "manual.pdf"
 
 
 def test_query_corpora_tool_returns_evidence_payload(monkeypatch) -> None:

@@ -1,0 +1,9 @@
+Support notes
+
+Common setup issue:
+Customers sometimes forget to connect the AC adapter to the laptop before checking the charging light.
+
+Recommended support flow:
+1. Ask the customer to reconnect the adapter.
+2. Ask them to try another wall outlet.
+3. Escalate only if the charging light still stays off.

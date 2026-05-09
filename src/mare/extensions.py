@@ -5,6 +5,8 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
 
 from mare.ingest import ingest_pdf
 from mare.objects import extract_document_objects
@@ -16,7 +18,7 @@ from mare.types import DocumentObject, Modality, ObjectType, RetrievalHit
 class DocumentParser(Protocol):
     """Build or update a MARE corpus from a source document."""
 
-    def ingest(self, pdf_path: Path, output_path: Path) -> Path:
+    def ingest(self, source_path: Path, output_path: Path) -> Path:
         """Return the path to the generated corpus file."""
 
 
@@ -91,6 +93,113 @@ class BuiltinPDFParser:
     def ingest(self, pdf_path: Path, output_path: Path) -> Path:
         ingest_pdf(pdf_path=pdf_path, output_path=output_path)
         return output_path
+
+
+class BuiltinTextParser:
+    """Default local parser for plain-text and markdown-style source documents."""
+
+    def ingest(self, source_path: Path, output_path: Path) -> Path:
+        raw_text = source_path.read_text()
+        return _write_text_like_payload(
+            source_path=source_path,
+            output_path=output_path,
+            raw_text=raw_text,
+            parser_name="text",
+            collection_name="text-ingest",
+        )
+
+
+class BuiltinDocxParser:
+    """Default local parser for .docx documents using the standard library zip/xml stack."""
+
+    _WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+    def ingest(self, source_path: Path, output_path: Path) -> Path:
+        return _write_text_like_payload(
+            source_path=source_path,
+            output_path=output_path,
+            raw_text=self._extract_docx_text(source_path),
+            parser_name="docx",
+            collection_name="docx-ingest",
+        )
+
+    def _extract_docx_text(self, source_path: Path) -> str:
+        with ZipFile(source_path) as archive:
+            document_xml = archive.read("word/document.xml")
+
+        root = ET.fromstring(document_xml)
+        paragraphs: list[str] = []
+        for paragraph in root.findall(".//w:body/w:p", self._WORD_NAMESPACE):
+            text = self._paragraph_text(paragraph)
+            if not text:
+                continue
+            style = self._paragraph_style(paragraph)
+            if style.startswith("Heading"):
+                level = "".join(ch for ch in style if ch.isdigit()) or "1"
+                paragraphs.append(f"{'#' * max(1, int(level))} {text}")
+            else:
+                paragraphs.append(text)
+        return "\n".join(paragraphs)
+
+    def _paragraph_style(self, paragraph) -> str:
+        style = paragraph.find("./w:pPr/w:pStyle", self._WORD_NAMESPACE)
+        if style is None:
+            return ""
+        return style.attrib.get(f"{{{self._WORD_NAMESPACE['w']}}}val", "")
+
+    def _paragraph_text(self, paragraph) -> str:
+        parts = [node.text or "" for node in paragraph.findall(".//w:t", self._WORD_NAMESPACE)]
+        return "".join(parts).strip()
+
+
+def _write_text_like_payload(
+    *,
+    source_path: Path,
+    output_path: Path,
+    raw_text: str,
+    parser_name: str,
+    collection_name: str,
+) -> Path:
+    from mare.ingest import _infer_layout_hints, _infer_page_signals, _normalize_text
+
+    text = _normalize_text(raw_text) if raw_text.strip() else "[No extractable text found in document]"
+    doc_id = f"{source_path.stem.lower().replace(' ', '-')}-p1"
+    objects = extract_document_objects(raw_text or text, doc_id, 1)
+    payload = {
+        "source_document": str(source_path),
+        "documents": [
+            {
+                "doc_id": doc_id,
+                "title": source_path.stem,
+                "page": 1,
+                "text": text,
+                "image_caption": "",
+                "layout_hints": _infer_layout_hints(text),
+                "page_image_path": "",
+                "objects": [
+                    {
+                        "object_id": obj.object_id,
+                        "doc_id": obj.doc_id,
+                        "page": obj.page,
+                        "object_type": obj.object_type.value,
+                        "content": obj.content,
+                        "metadata": obj.metadata,
+                    }
+                    for obj in objects
+                ],
+                "metadata": {
+                    "source": str(source_path),
+                    "source_type": source_path.suffix.lower().lstrip("."),
+                    "collection": collection_name,
+                    "signals": _infer_page_signals(text),
+                    "parser": parser_name,
+                },
+            }
+        ],
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2))
+    return output_path
 
 
 def _build_payload_document(
@@ -1368,9 +1477,11 @@ class FAISSIndexer:
 
 _PARSER_REGISTRY: dict[str, DocumentParser] = {
     "builtin": BuiltinPDFParser(),
+    "docx": BuiltinDocxParser(),
     "docling": DoclingParser(),
     "paddleocr": PaddleOCRParser(),
     "surya": SuryaParser(),
+    "text": BuiltinTextParser(),
     "unstructured": UnstructuredParser(),
 }
 

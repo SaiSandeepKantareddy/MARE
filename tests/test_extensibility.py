@@ -5,10 +5,12 @@ import math
 import sys
 import types
 from pathlib import Path
+from zipfile import ZipFile
 
 import mare.ingest as ingest_module
 import pytest
 from mare import (
+    BuiltinDocxParser,
     FAISSIndexer,
     FAISSRetriever,
     FastEmbedReranker,
@@ -21,8 +23,9 @@ from mare import (
     QdrantIndexer,
     SentenceTransformersRetriever,
     SuryaParser,
+    load_document,
 )
-from mare.extensions import DoclingParser, MAREConfig, UnstructuredParser, get_parser
+from mare.extensions import BuiltinTextParser, DoclingParser, MAREConfig, UnstructuredParser, get_parser
 from mare.retrievers.base import BaseRetriever
 from mare.types import Document, DocumentObject, Modality, ObjectType, RetrievalHit
 
@@ -110,10 +113,86 @@ def test_custom_reranker_can_reorder_fused_results() -> None:
 
 def test_builtin_parsers_are_discoverable() -> None:
     assert get_parser("builtin") is not None
+    assert get_parser("docx") is not None
     assert get_parser("docling") is not None
     assert get_parser("paddleocr") is not None
     assert get_parser("surya") is not None
+    assert get_parser("text") is not None
     assert get_parser("unstructured") is not None
+
+
+def test_builtin_text_parser_builds_mare_corpus(tmp_path: Path) -> None:
+    source = tmp_path / "notes.txt"
+    source.write_text("1. Review the report.\n2. Send the summary.\n")
+    output_path = tmp_path / "notes.json"
+
+    parser = BuiltinTextParser()
+    parser.ingest(source, output_path)
+    payload = json.loads(output_path.read_text())
+
+    assert payload["source_document"] == str(source)
+    assert payload["documents"][0]["metadata"]["parser"] == "text"
+
+
+def test_builtin_docx_parser_builds_mare_corpus(tmp_path: Path) -> None:
+    source = tmp_path / "guide.docx"
+    with ZipFile(source, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+                  <w:r><w:t>Setup</w:t></w:r>
+                </w:p>
+                <w:p><w:r><w:t>1. Connect the adapter.</w:t></w:r></w:p>
+                <w:p><w:r><w:t>2. Restart the laptop.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """,
+        )
+    output_path = tmp_path / "guide.json"
+
+    parser = BuiltinDocxParser()
+    parser.ingest(source, output_path)
+    payload = json.loads(output_path.read_text())
+
+    assert payload["source_document"] == str(source)
+    assert payload["documents"][0]["metadata"]["parser"] == "docx"
+    assert any(obj["metadata"].get("heading") == "Setup" for obj in payload["documents"][0]["objects"])
+
+
+def test_load_document_uses_builtin_text_parser_for_txt(tmp_path: Path) -> None:
+    source = tmp_path / "notes.txt"
+    source.write_text("Please review the report and send the summary.")
+
+    app = load_document(source)
+
+    assert app.best_match("review the report").page == 1
+
+
+def test_load_document_uses_builtin_docx_parser_for_docx(tmp_path: Path) -> None:
+    source = tmp_path / "guide.docx"
+    with ZipFile(source, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+                  <w:r><w:t>Setup</w:t></w:r>
+                </w:p>
+                <w:p><w:r><w:t>Connect the adapter to the laptop.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """,
+        )
+
+    app = load_document(source)
+
+    assert app.best_match("connect the adapter").page == 1
 
 
 def test_identity_reranker_preserves_order() -> None:

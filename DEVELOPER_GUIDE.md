@@ -62,6 +62,37 @@ Important:
 
 The repository also includes a few tiny bundled example PDFs in `examples/sample_pdfs/` for quick smoke tests.
 
+## Public Vs Local Files
+
+When working in this repo, keep the public story and local workspace artifacts separate.
+
+Public repo content:
+
+- `README.md`
+- `DEVELOPER_GUIDE.md`
+- `PUBLISHING.md`
+- `examples/`
+- bundled sample content such as `examples/sample_pdfs/` and `examples/mixed_docs/`
+- `src/`
+- `tests/`
+- versioned `RELEASE_NOTES_*.md`
+
+Local or internal-only workspace content:
+
+- `generated/`
+- `notes/`
+- `skills/`
+- `TESTING.md`
+- ad hoc local PDFs such as `116441.pdf`
+- ad hoc vendor/support PDFs kept in the repo root for local testing
+
+Guideline:
+
+- use bundled examples or generic filenames in public docs
+- treat `examples/` as intentionally public sample material, not a scratch area for one-off local files
+- keep internal testing notes out of the public repo unless they are intentionally promoted into developer documentation
+- treat local PDFs and generated corpora as workspace artifacts, not committed source
+
 ## First Files To Read
 
 If you are new to the repo, read these first:
@@ -224,9 +255,9 @@ Before running eval commands, generate the corpus locally from the source PDF.
 Example:
 
 ```bash
-mare-ingest 116441.pdf
+mare-ingest ./manual.pdf
 PYTHONPATH=src python3 -m mare.eval \
-  --corpus generated/116441.json \
+  --corpus generated/manual.json \
   --eval examples/manual_116441_eval_cases.json
 ```
 

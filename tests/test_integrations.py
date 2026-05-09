@@ -5,9 +5,13 @@ import types
 
 from mare import MAREApp
 from mare.integrations import (
+    build_grounded_summary_payload,
+    create_langchain_tool,
     create_langgraph_tool,
     create_langchain_retriever,
+    create_llamaindex_tool,
     create_llamaindex_retriever,
+    format_evidence_citation,
     hits_to_evidence_payload,
     hit_to_langchain_document,
     hit_to_llamaindex_node,
@@ -32,6 +36,23 @@ def _sample_hit() -> RetrievalHit:
     )
 
 
+def _second_sample_hit() -> RetrievalHit:
+    return RetrievalHit(
+        doc_id="doc-62",
+        title="Guide",
+        page=62,
+        modality=Modality.TEXT,
+        score=0.73,
+        reason="Matched similar setup wording",
+        snippet="Enable Wake on LAN before shutting down the system.",
+        page_image_path="generated/guide/page-62.png",
+        highlight_image_path="generated/guide/highlights/page-62.png",
+        object_id="obj-2",
+        object_type="section",
+        metadata={"source": "guide.docx", "heading": "Wake on LAN"},
+    )
+
+
 def test_hit_to_langchain_document_maps_metadata(monkeypatch) -> None:
     class _FakeDocument:
         def __init__(self, page_content: str, metadata: dict) -> None:
@@ -51,12 +72,40 @@ def test_hit_to_langchain_document_maps_metadata(monkeypatch) -> None:
 
 
 def test_hits_to_evidence_payload_preserves_result_fields() -> None:
-    payload = hits_to_evidence_payload("wake on lan", [_sample_hit()])
+    payload = hits_to_evidence_payload("wake on lan", [_sample_hit(), _second_sample_hit()])
 
     assert payload["query"] == "wake on lan"
-    assert len(payload["results"]) == 1
+    assert len(payload["results"]) == 2
     assert payload["results"][0]["doc_id"] == "doc-61"
     assert payload["results"][0]["object_type"] == "procedure"
+    assert payload["results"][0]["citation"] == "Manual | page 61 | Wake on LAN"
+    assert payload["comparison"][0]["citation"] == "Manual | page 61 | Wake on LAN"
+    assert payload["comparison"][1]["citation"] == "guide.docx | page 62 | Wake on LAN"
+    assert payload["summary"]["overview"] == "Found 2 grounded results across 2 sources."
+    assert payload["summary"]["highlights"][1]["citation"] == "guide.docx | page 62 | Wake on LAN"
+
+
+def test_build_grounded_summary_payload_handles_no_results() -> None:
+    payload = build_grounded_summary_payload([])
+
+    assert payload["overview"] == "No grounded evidence found."
+    assert payload["highlight_count"] == 0
+    assert payload["highlights"] == []
+
+
+def test_format_evidence_citation_uses_line_metadata_when_available() -> None:
+    citation = format_evidence_citation(
+        title="Guide",
+        page=1,
+        metadata={
+            "source": "/tmp/guide.md",
+            "line_start": "3",
+            "line_end": "7",
+            "heading": "Setup",
+        },
+    )
+
+    assert citation == "guide.md | lines 3-7 | Setup"
 
 
 def test_hit_to_llamaindex_node_maps_metadata(monkeypatch) -> None:
@@ -152,6 +201,40 @@ def test_create_langgraph_tool_returns_structured_evidence(monkeypatch) -> None:
     assert result["results"][0]["page"] == 4
 
 
+def test_create_langchain_tool_returns_structured_evidence(monkeypatch) -> None:
+    class _FakeStructuredTool:
+        def __init__(self, func, name: str, description: str) -> None:
+            self.func = func
+            self.name = name
+            self.description = description
+
+        def invoke(self, payload):
+            if isinstance(payload, dict):
+                return self.func(**payload)
+            return self.func(payload)
+
+        @classmethod
+        def from_function(cls, func, name: str, description: str):
+            return cls(func=func, name=name, description=description)
+
+    fake_tools = types.ModuleType("langchain_core.tools")
+    fake_tools.StructuredTool = _FakeStructuredTool
+    monkeypatch.setitem(sys.modules, "langchain_core", types.ModuleType("langchain_core"))
+    monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools)
+
+    app = MAREApp.from_documents(
+        [Document(doc_id="11", title="Guide", page=3, text="Connect the AC adapter to the computer.")]
+    )
+
+    tool = create_langchain_tool(app, top_k=1, name="mare_langchain_tool")
+    result = tool.invoke({"query": "connect the AC adapter"})
+
+    assert tool.name == "mare_langchain_tool"
+    assert result["results"][0]["page"] == 3
+    assert "summary" in result
+    assert "comparison" in result
+
+
 def test_mare_app_exposes_langgraph_tool(monkeypatch) -> None:
     class _FakeStructuredTool:
         def __init__(self, func, name: str, description: str) -> None:
@@ -179,6 +262,35 @@ def test_mare_app_exposes_langgraph_tool(monkeypatch) -> None:
 
     assert tool.name == "custom_mare_tool"
     assert result["results"][0]["doc_id"] == "5"
+
+
+def test_mare_app_exposes_langchain_tool(monkeypatch) -> None:
+    class _FakeStructuredTool:
+        def __init__(self, func, name: str, description: str) -> None:
+            self.func = func
+            self.name = name
+            self.description = description
+
+        def invoke(self, payload):
+            if isinstance(payload, dict):
+                return self.func(**payload)
+            return self.func(payload)
+
+        @classmethod
+        def from_function(cls, func, name: str, description: str):
+            return cls(func=func, name=name, description=description)
+
+    fake_tools = types.ModuleType("langchain_core.tools")
+    fake_tools.StructuredTool = _FakeStructuredTool
+    monkeypatch.setitem(sys.modules, "langchain_core", types.ModuleType("langchain_core"))
+    monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools)
+
+    app = MAREApp.from_documents([Document(doc_id="12", title="Manual", page=6, text="Wake on LAN feature setup.")])
+    tool = app.as_langchain_tool(top_k=1, name="custom_langchain_tool")
+    result = tool.invoke({"query": "wake on lan"})
+
+    assert tool.name == "custom_langchain_tool"
+    assert result["results"][0]["doc_id"] == "12"
 
 
 def test_create_langchain_retriever_factory_works(monkeypatch) -> None:
@@ -254,6 +366,34 @@ def test_create_llamaindex_retriever_returns_nodes(monkeypatch) -> None:
     assert results[0].score > 0
 
 
+def test_create_llamaindex_tool_returns_structured_evidence(monkeypatch) -> None:
+    class _FakeFunctionTool:
+        def __init__(self, fn, name: str, description: str) -> None:
+            self.fn = fn
+            self.metadata = {"name": name, "description": description}
+
+        def __call__(self, *args, **kwargs):
+            return self.fn(*args, **kwargs)
+
+        @classmethod
+        def from_defaults(cls, fn, name: str, description: str):
+            return cls(fn=fn, name=name, description=description)
+
+    fake_tools = types.ModuleType("llama_index.core.tools")
+    fake_tools.FunctionTool = _FakeFunctionTool
+    monkeypatch.setitem(sys.modules, "llama_index", types.ModuleType("llama_index"))
+    monkeypatch.setitem(sys.modules, "llama_index.core", types.ModuleType("llama_index.core"))
+    monkeypatch.setitem(sys.modules, "llama_index.core.tools", fake_tools)
+
+    app = MAREApp.from_documents([Document(doc_id="13", title="Manual", page=7, text="Connect the AC adapter.")])
+    tool = create_llamaindex_tool(app, top_k=1, name="mare_llamaindex_tool")
+    result = tool(query="connect the AC adapter")
+
+    assert tool.metadata["name"] == "mare_llamaindex_tool"
+    assert result["results"][0]["doc_id"] == "13"
+    assert "summary" in result
+
+
 def test_mare_app_exposes_llamaindex_retriever(monkeypatch) -> None:
     class _FakeBaseRetriever:
         def __init__(self, *args, **kwargs) -> None:
@@ -294,3 +434,30 @@ def test_mare_app_exposes_llamaindex_retriever(monkeypatch) -> None:
 
     assert len(results) == 1
     assert results[0].node.metadata["page"] == 5
+
+
+def test_mare_app_exposes_llamaindex_tool(monkeypatch) -> None:
+    class _FakeFunctionTool:
+        def __init__(self, fn, name: str, description: str) -> None:
+            self.fn = fn
+            self.metadata = {"name": name, "description": description}
+
+        def __call__(self, *args, **kwargs):
+            return self.fn(*args, **kwargs)
+
+        @classmethod
+        def from_defaults(cls, fn, name: str, description: str):
+            return cls(fn=fn, name=name, description=description)
+
+    fake_tools = types.ModuleType("llama_index.core.tools")
+    fake_tools.FunctionTool = _FakeFunctionTool
+    monkeypatch.setitem(sys.modules, "llama_index", types.ModuleType("llama_index"))
+    monkeypatch.setitem(sys.modules, "llama_index.core", types.ModuleType("llama_index.core"))
+    monkeypatch.setitem(sys.modules, "llama_index.core.tools", fake_tools)
+
+    app = MAREApp.from_documents([Document(doc_id="14", title="Guide", page=9, text="Enable Wake on LAN.")])
+    tool = app.as_llamaindex_tool(top_k=1, name="custom_llamaindex_tool")
+    result = tool(query="wake on lan")
+
+    assert tool.metadata["name"] == "custom_llamaindex_tool"
+    assert result["results"][0]["doc_id"] == "14"

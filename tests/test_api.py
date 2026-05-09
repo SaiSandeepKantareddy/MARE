@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from mare import MAREApp, load_corpora, load_corpus
+from mare import MAREApp, load_corpora, load_corpus, load_document
 from mare.types import Document
 
 
@@ -54,3 +54,18 @@ def test_load_corpora_combines_multiple_json_corpora(tmp_path: Path) -> None:
     summary = app.describe_corpus(page_limit=2, object_limit=1)
     assert summary["corpus_count"] == 2
     assert len(summary["corpus_paths"]) == 2
+
+
+def test_load_document_supports_markdown_input(tmp_path: Path) -> None:
+    source = tmp_path / "guide.md"
+    source.write_text("# Setup\n1. Connect the adapter.\n2. Restart the laptop.\n")
+
+    app = load_document(source)
+
+    assert app.source_document == source
+    assert app.source_documents == [source]
+    assert app.describe_corpus()["source_document"] == str(source)
+    assert app.best_match("connect the adapter").page == 1
+    procedure_objects = app.search_objects("connect the adapter", object_type="procedure", limit=5)
+    assert procedure_objects
+    assert procedure_objects[0]["metadata"]["heading"] == "Setup"

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
-  { name = "Saisandeep Kantareddy" }
+  { name = "Sai Sandeep Kantareddy", email = "mare.retrieval@gmail.com" }
 ]
 keywords = ["retrieval", "rag", "pdf", "document-ai", "evidence", "search"]
 classifiers = [

@@ -9,8 +9,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from mare.api import load_corpora, load_corpus, load_pdf
+from mare.api import load_corpora, load_corpus, load_document, load_pdf
 from mare.integrations import hits_to_evidence_payload
+
+_PUBLIC_BASE_URL = ""
+_MEDIA_PATH = "/media"
 
 
 def _safe_download_dir() -> Path:
@@ -41,6 +44,76 @@ def _download_pdf_url(pdf_url: str, download_path: str | None = None) -> Path:
     return target
 
 
+def _normalize_public_base_url(url: str) -> str:
+    return url.rstrip("/")
+
+
+def _normalize_media_path(path: str) -> str:
+    trimmed = (path or "/media").strip()
+    if not trimmed.startswith("/"):
+        trimmed = f"/{trimmed}"
+    return trimmed.rstrip("/") or "/media"
+
+
+def _asset_url(path: str) -> str:
+    if not _PUBLIC_BASE_URL or not path:
+        return ""
+    asset_path = Path(path)
+    try:
+        relative = asset_path.resolve().relative_to(Path.cwd().resolve())
+    except ValueError:
+        return ""
+    quoted = urllib.parse.quote(relative.as_posix())
+    return f"{_PUBLIC_BASE_URL}{_MEDIA_PATH}/{quoted}"
+
+
+def _attach_remote_asset_urls(payload: dict[str, Any]) -> dict[str, Any]:
+    proof_assets: list[dict[str, Any]] = []
+    for result in payload.get("results", []):
+        page_path = str(result.get("page_image_path") or "")
+        highlight_path = str(result.get("highlight_image_path") or "")
+        result["page_image_url"] = _asset_url(page_path)
+        result["highlight_image_url"] = _asset_url(highlight_path)
+        proof_assets.append(
+            {
+                "citation": result.get("citation") or "",
+                "page": result.get("page"),
+                "source_document": str(result.get("metadata", {}).get("source") or result.get("title") or ""),
+                "page_image_path": page_path,
+                "highlight_image_path": highlight_path,
+                "page_image_url": result["page_image_url"],
+                "highlight_image_url": result["highlight_image_url"],
+            }
+        )
+    payload["proof_assets"] = proof_assets
+    payload["primary_proof_asset"] = proof_assets[0] if proof_assets else {}
+    payload["best_evidence"] = {
+        "query": payload.get("query") or "",
+        "citation": "",
+        "snippet": "",
+        "page": None,
+        "source_document": "",
+        "page_image_url": "",
+        "highlight_image_url": "",
+    }
+    if payload.get("results"):
+        best = payload["results"][0]
+        payload["best_evidence"] = {
+            "query": payload.get("query") or "",
+            "citation": best.get("citation") or "",
+            "snippet": best.get("snippet") or "",
+            "page": best.get("page"),
+            "source_document": str(best.get("metadata", {}).get("source") or best.get("title") or ""),
+            "page_image_url": best.get("page_image_url") or "",
+            "highlight_image_url": best.get("highlight_image_url") or "",
+        }
+    payload["proof_links"] = {
+        "page_image_url": payload["best_evidence"].get("page_image_url") or "",
+        "highlight_image_url": payload["best_evidence"].get("highlight_image_url") or "",
+    }
+    return payload
+
+
 def ingest_pdf_tool(
     pdf_path: str,
     output_path: str | None = None,
@@ -58,6 +131,23 @@ def ingest_pdf_tool(
     }
 
 
+def ingest_document_tool(
+    document_path: str,
+    output_path: str | None = None,
+    reuse: bool = False,
+    parser: str = "builtin",
+) -> dict[str, Any]:
+    app = load_document(source_path=document_path, output_path=output_path, reuse=reuse, parser=parser)
+    return {
+        "document_path": str(document_path),
+        "corpus_path": str(app.corpus_path) if app.corpus_path else "",
+        "document_count": len(app.documents),
+        "pages": len(app.documents),
+        "parser": parser,
+        "source_document": str(app.source_document) if app.source_document else str(document_path),
+    }
+
+
 def query_pdf_tool(
     pdf_path: str,
     query: str,
@@ -69,9 +159,32 @@ def query_pdf_tool(
     app = load_pdf(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser)
     hits = app.retrieve(query=query, top_k=top_k)
     payload = hits_to_evidence_payload(query=query, hits=hits)
+    _attach_remote_asset_urls(payload)
     payload.update(
         {
             "pdf_path": str(pdf_path),
+            "corpus_path": str(app.corpus_path) if app.corpus_path else "",
+            "parser": parser,
+        }
+    )
+    return payload
+
+
+def query_document_tool(
+    document_path: str,
+    query: str,
+    output_path: str | None = None,
+    reuse: bool = False,
+    parser: str = "builtin",
+    top_k: int = 3,
+) -> dict[str, Any]:
+    app = load_document(source_path=document_path, output_path=output_path, reuse=reuse, parser=parser)
+    hits = app.retrieve(query=query, top_k=top_k)
+    payload = hits_to_evidence_payload(query=query, hits=hits)
+    _attach_remote_asset_urls(payload)
+    payload.update(
+        {
+            "document_path": str(document_path),
             "corpus_path": str(app.corpus_path) if app.corpus_path else "",
             "parser": parser,
         }
@@ -123,6 +236,7 @@ def query_corpus_tool(corpus_path: str, query: str, top_k: int = 3) -> dict[str,
     app = load_corpus(corpus_path=corpus_path)
     hits = app.retrieve(query=query, top_k=top_k)
     payload = hits_to_evidence_payload(query=query, hits=hits)
+    _attach_remote_asset_urls(payload)
     payload.update({"corpus_path": str(corpus_path)})
     return payload
 
@@ -131,6 +245,7 @@ def query_corpora_tool(corpus_paths: list[str], query: str, top_k: int = 3) -> d
     app = load_corpora(corpus_paths=corpus_paths)
     hits = app.retrieve(query=query, top_k=top_k)
     payload = hits_to_evidence_payload(query=query, hits=hits)
+    _attach_remote_asset_urls(payload)
     payload.update(
         {
             "corpus_paths": [str(path) for path in corpus_paths],
@@ -183,6 +298,7 @@ def search_objects_tool(
 def create_mcp_server():
     try:
         from mcp.server.fastmcp import FastMCP
+        from starlette.responses import FileResponse, PlainTextResponse
     except ImportError as exc:
         raise RuntimeError(
             "MARE MCP support requires the `mcp` package. Install it with "
@@ -190,6 +306,18 @@ def create_mcp_server():
         ) from exc
 
     server = FastMCP("MARE")
+
+    @server.custom_route(f"{_MEDIA_PATH}/{{asset_path:path}}", methods=["GET"])
+    async def media_asset(request):
+        asset_path = request.path_params.get("asset_path", "")
+        requested = (asset_path or "").lstrip("/")
+        candidate = (Path.cwd() / requested).resolve()
+        cwd = Path.cwd().resolve()
+        if not str(candidate).startswith(str(cwd)):
+            return PlainTextResponse("Forbidden", status_code=403)
+        if not candidate.is_file():
+            return PlainTextResponse("Not Found", status_code=404)
+        return FileResponse(candidate)
 
     @server.tool()
     def ingest_pdf(
@@ -201,6 +329,17 @@ def create_mcp_server():
         """Ingest a PDF into a MARE corpus and return the generated corpus path and summary."""
 
         return ingest_pdf_tool(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser)
+
+    @server.tool()
+    def ingest_document(
+        document_path: str,
+        output_path: str | None = None,
+        reuse: bool = False,
+        parser: str = "builtin",
+    ) -> dict[str, Any]:
+        """Ingest a source document into a MARE corpus and return the generated corpus path and summary."""
+
+        return ingest_document_tool(document_path=document_path, output_path=output_path, reuse=reuse, parser=parser)
 
     @server.tool()
     def query_pdf(
@@ -215,6 +354,26 @@ def create_mcp_server():
 
         return query_pdf_tool(
             pdf_path=pdf_path,
+            query=query,
+            output_path=output_path,
+            reuse=reuse,
+            parser=parser,
+            top_k=top_k,
+        )
+
+    @server.tool()
+    def query_document(
+        document_path: str,
+        query: str,
+        output_path: str | None = None,
+        reuse: bool = False,
+        parser: str = "builtin",
+        top_k: int = 3,
+    ) -> dict[str, Any]:
+        """Query a source document directly and return grounded evidence with snippet, proof metadata, and assets when available."""
+
+        return query_document_tool(
+            document_path=document_path,
             query=query,
             output_path=output_path,
             reuse=reuse,
@@ -352,11 +511,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable FastMCP host/origin protection. Use only for controlled local testing.",
     )
+    parser.add_argument(
+        "--public-base-url",
+        default="",
+        help="Public HTTPS base URL for remote asset links, e.g. https://abc123.ngrok-free.app",
+    )
+    parser.add_argument(
+        "--media-path",
+        default="/media/",
+        help="HTTP path used to serve generated proof assets. Default: /media/",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
+    global _PUBLIC_BASE_URL, _MEDIA_PATH
     args = build_arg_parser().parse_args(argv)
+    _PUBLIC_BASE_URL = _normalize_public_base_url(args.public_base_url)
+    _MEDIA_PATH = _normalize_media_path(args.media_path)
     if args.transport == "stdio" and sys.stdin.isatty() and sys.stdout.isatty():
         raise SystemExit(
             "mare-mcp defaults to stdio, which is meant to be launched by an MCP-capable client rather than run "

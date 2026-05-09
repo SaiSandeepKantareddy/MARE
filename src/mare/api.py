@@ -16,6 +16,8 @@ class MAREApp:
     documents: list[Document]
     corpus_path: Path | None = None
     corpus_paths: list[Path] = field(default_factory=list)
+    source_document: Path | None = None
+    source_documents: list[Path] = field(default_factory=list)
     source_pdf: Path | None = None
     source_pdfs: list[Path] = field(default_factory=list)
     config: MAREConfig = field(default_factory=MAREConfig)
@@ -24,8 +26,18 @@ class MAREApp:
     def __post_init__(self) -> None:
         if self.corpus_path and not self.corpus_paths:
             self.corpus_paths = [self.corpus_path]
+        if self.source_document and not self.source_documents:
+            self.source_documents = [self.source_document]
         if self.source_pdf and not self.source_pdfs:
             self.source_pdfs = [self.source_pdf]
+        if self.source_pdfs and not self.source_documents:
+            self.source_documents = list(self.source_pdfs)
+        if self.source_documents and not self.source_pdfs:
+            self.source_pdfs = list(self.source_documents)
+        if self.source_pdfs and not self.source_pdf and len(self.source_pdfs) == 1:
+            self.source_pdf = self.source_pdfs[0]
+        if self.source_documents and not self.source_document and len(self.source_documents) == 1:
+            self.source_document = self.source_documents[0]
         self.engine = MAREngine(self.documents, config=self.config)
 
     @classmethod
@@ -36,14 +48,16 @@ class MAREApp:
     def from_corpus(cls, corpus_path: str | Path, config: MAREConfig | None = None) -> "MAREApp":
         path = Path(corpus_path)
         documents = load_documents(path)
-        source_pdfs = cls._source_pdfs_from_documents(documents)
-        primary_source = source_pdfs[0] if len(source_pdfs) == 1 else None
+        source_documents = cls._source_documents_from_documents(documents)
+        primary_source = source_documents[0] if len(source_documents) == 1 else None
         return cls(
             documents=documents,
             corpus_path=path,
             corpus_paths=[path],
+            source_document=primary_source,
+            source_documents=source_documents,
             source_pdf=primary_source,
-            source_pdfs=source_pdfs,
+            source_pdfs=source_documents,
             config=config or MAREConfig(),
         )
 
@@ -53,14 +67,45 @@ class MAREApp:
         documents: list[Document] = []
         for path in paths:
             documents.extend(load_documents(path))
-        source_pdfs = cls._source_pdfs_from_documents(documents)
-        primary_source = source_pdfs[0] if len(source_pdfs) == 1 else None
+        source_documents = cls._source_documents_from_documents(documents)
+        primary_source = source_documents[0] if len(source_documents) == 1 else None
         return cls(
             documents=documents,
             corpus_paths=paths,
+            source_document=primary_source,
+            source_documents=source_documents,
             source_pdf=primary_source,
-            source_pdfs=source_pdfs,
+            source_pdfs=source_documents,
             config=config or MAREConfig(),
+        )
+
+    @classmethod
+    def from_document(
+        cls,
+        source_path: str | Path,
+        output_path: str | Path | None = None,
+        reuse: bool = False,
+        parser: str | DocumentParser | None = None,
+        config: MAREConfig | None = None,
+    ) -> "MAREApp":
+        source_file = Path(source_path)
+        corpus_path = Path(output_path) if output_path is not None else Path("generated") / f"{source_file.stem}.json"
+        corpus_path.parent.mkdir(parents=True, exist_ok=True)
+        resolved_config = config or MAREConfig()
+        parser_instance = _resolve_parser(source_file, parser or resolved_config.parser or "builtin")
+
+        if not reuse or not corpus_path.exists():
+            parser_instance.ingest(source_file, corpus_path)
+
+        documents = load_documents(corpus_path)
+        return cls(
+            documents=documents,
+            corpus_path=corpus_path,
+            source_document=source_file,
+            source_documents=[source_file],
+            source_pdf=source_file,
+            source_pdfs=[source_file],
+            config=resolved_config,
         )
 
     @classmethod
@@ -72,19 +117,13 @@ class MAREApp:
         parser: str | DocumentParser | None = None,
         config: MAREConfig | None = None,
     ) -> "MAREApp":
-        pdf_file = Path(pdf_path)
-        corpus_path = Path(output_path) if output_path is not None else Path("generated") / f"{pdf_file.stem}.json"
-        corpus_path.parent.mkdir(parents=True, exist_ok=True)
-        resolved_config = config or MAREConfig()
-        parser_instance = parser or resolved_config.parser or "builtin"
-        if isinstance(parser_instance, str):
-            parser_instance = get_parser(parser_instance)
-
-        if not reuse or not corpus_path.exists():
-            parser_instance.ingest(pdf_path=pdf_file, output_path=corpus_path)
-
-        documents = load_documents(corpus_path)
-        return cls(documents=documents, corpus_path=corpus_path, source_pdf=pdf_file, config=resolved_config)
+        return cls.from_document(
+            source_path=pdf_path,
+            output_path=output_path,
+            reuse=reuse,
+            parser=parser,
+            config=config,
+        )
 
     def explain(self, query: str, top_k: int = 3) -> RetrievalExplanation:
         return self.engine.explain(query, top_k=top_k)
@@ -141,6 +180,8 @@ class MAREApp:
             "corpus_path": str(self.corpus_path) if self.corpus_path else "",
             "corpus_paths": [str(path) for path in self.corpus_paths],
             "corpus_count": len(self.corpus_paths) if self.corpus_paths else (1 if self.corpus_path else 0),
+            "source_document": str(self.source_document) if self.source_document else "",
+            "source_documents": [str(path) for path in self.source_documents],
             "source_pdf": str(self.source_pdf) if self.source_pdf else "",
             "source_pdfs": [str(path) for path in self.source_pdfs],
             "title": self.documents[0].title if self.documents else "",
@@ -197,6 +238,11 @@ class MAREApp:
 
         return create_langchain_retriever(self, top_k=top_k)
 
+    def as_langchain_tool(self, top_k: int = 3, name: str = "mare_retrieve", description: str | None = None):
+        from mare.integrations import create_langchain_tool
+
+        return create_langchain_tool(self, top_k=top_k, name=name, description=description)
+
     def as_langgraph_tool(self, top_k: int = 3, name: str = "mare_retrieve", description: str | None = None):
         from mare.integrations import create_langgraph_tool
 
@@ -206,6 +252,11 @@ class MAREApp:
         from mare.integrations import create_llamaindex_retriever
 
         return create_llamaindex_retriever(self, top_k=top_k)
+
+    def as_llamaindex_tool(self, top_k: int = 3, name: str = "mare_retrieve", description: str | None = None):
+        from mare.integrations import create_llamaindex_tool
+
+        return create_llamaindex_tool(self, top_k=top_k, name=name, description=description)
 
     @staticmethod
     def _preview_text(text: str, limit: int = 220) -> str:
@@ -230,7 +281,7 @@ class MAREApp:
         return re.findall(r"[a-z0-9]+", text.lower())
 
     @staticmethod
-    def _source_pdfs_from_documents(documents: list[Document]) -> list[Path]:
+    def _source_documents_from_documents(documents: list[Document]) -> list[Path]:
         seen: set[str] = set()
         paths: list[Path] = []
         for document in documents:
@@ -239,6 +290,18 @@ class MAREApp:
                 seen.add(source)
                 paths.append(Path(source))
         return paths
+
+
+def _resolve_parser(source_path: Path, parser: str | DocumentParser) -> DocumentParser:
+    if not isinstance(parser, str):
+        return parser
+    if parser == "builtin":
+        suffix = source_path.suffix.lower()
+        if suffix in {".md", ".markdown", ".txt"}:
+            return get_parser("text")
+        if suffix == ".docx":
+            return get_parser("docx")
+    return get_parser(parser)
 
 
 def load_corpus(corpus_path: str | Path, config: MAREConfig | None = None) -> MAREApp:
@@ -257,3 +320,19 @@ def load_pdf(
     config: MAREConfig | None = None,
 ) -> MAREApp:
     return MAREApp.from_pdf(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser, config=config)
+
+
+def load_document(
+    source_path: str | Path,
+    output_path: str | Path | None = None,
+    reuse: bool = False,
+    parser: str | DocumentParser | None = None,
+    config: MAREConfig | None = None,
+) -> MAREApp:
+    return MAREApp.from_document(
+        source_path=source_path,
+        output_path=output_path,
+        reuse=reuse,
+        parser=parser,
+        config=config,
+    )

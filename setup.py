@@ -12,6 +12,7 @@ setup(
     long_description=README,
     long_description_content_type="text/markdown",
     author="Saisandeep Kantareddy",
+    author_email=" ",
     url="https://github.com/mare-retrieval/MARE",
     package_dir={"": "src"},
     packages=find_packages("src"),

@@ -21,6 +21,11 @@ def _split_lines(text: str) -> list[str]:
     return [line for line in lines if line]
 
 
+def _enumerated_lines(text: str) -> list[tuple[int, str]]:
+    lines = [line.strip() for line in text.splitlines()]
+    return [(index, line) for index, line in enumerate(lines) if line]
+
+
 def _region_hint(index: int, total: int) -> str:
     if total <= 0:
         return "unknown"
@@ -107,7 +112,31 @@ def _find_step_markers(page_text: str) -> list[tuple[int, str]]:
     return [(start, step) for start, step in deduped.items()]
 
 
+def _is_markdown_heading(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith("#"):
+        return True
+    return bool(re.fullmatch(r"[A-Z][A-Za-z0-9&() /+-]{2,60}", stripped) and len(stripped.split()) <= 10)
+
+
+def _clean_heading(line: str) -> str:
+    stripped = line.strip()
+    if stripped.startswith("#"):
+        return stripped.lstrip("#").strip()
+    return stripped
+
+
+def _is_list_step(line: str) -> bool:
+    return bool(re.match(r"^(?:[-*+]\s+|\d+[.)]\s+)", line.strip()))
+
+
 def _extract_procedures(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
+    line_objects = _extract_line_procedures(page_text, doc_id, page)
+    if line_objects:
+        return line_objects
+
     matches = _find_step_markers(page_text)
     if not matches:
         return []
@@ -126,6 +155,38 @@ def _extract_procedures(page_text: str, doc_id: str, page: int) -> list[Document
                 object_type=ObjectType.PROCEDURE,
                 content=content,
                 metadata={"step": step_no},
+            )
+        )
+    return objects
+
+
+def _extract_line_procedures(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
+    lines = _enumerated_lines(page_text)
+    if not lines:
+        return []
+
+    objects: list[DocumentObject] = []
+    current_heading = ""
+    for visible_index, (_, line) in enumerate(lines):
+        if _is_markdown_heading(line):
+            current_heading = _clean_heading(line)
+            continue
+        if not _is_list_step(line):
+            continue
+
+        step_match = re.match(r"^(\d+)[.)]\s+", line.strip())
+        step_no = step_match.group(1) if step_match else str(len(objects) + 1)
+        metadata = {"step": step_no, **_line_metadata(visible_index, visible_index, len(lines))}
+        if current_heading:
+            metadata["heading"] = current_heading
+        objects.append(
+            DocumentObject(
+                object_id=f"{doc_id}:procedure:{page}:{step_no}",
+                doc_id=doc_id,
+                page=page,
+                object_type=ObjectType.PROCEDURE,
+                content=_normalize(line),
+                metadata=metadata,
             )
         )
     return objects
@@ -302,6 +363,10 @@ def _extract_tables(page_text: str, doc_id: str, page: int) -> list[DocumentObje
 
 
 def _extract_sections(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
+    markdown_sections = _extract_markdown_sections(page_text, doc_id, page)
+    if markdown_sections:
+        return markdown_sections
+
     lines = _split_lines(page_text)
     if lines:
         chunk_size = 3
@@ -347,6 +412,39 @@ def _extract_sections(page_text: str, doc_id: str, page: int) -> list[DocumentOb
                 object_type=ObjectType.SECTION,
                 content=content,
                 metadata={"region_hint": _region_hint(idx, len(sentences))},
+            )
+        )
+    return objects
+
+
+def _extract_markdown_sections(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
+    lines = _enumerated_lines(page_text)
+    if not lines:
+        return []
+
+    heading_positions = [(visible_index, line) for visible_index, (_, line) in enumerate(lines) if _is_markdown_heading(line)]
+    if not heading_positions:
+        return []
+
+    objects: list[DocumentObject] = []
+    for index, (start_visible_index, heading_line) in enumerate(heading_positions):
+        end_visible_index = heading_positions[index + 1][0] - 1 if index + 1 < len(heading_positions) else len(lines) - 1
+        block = [line for visible_index, (_, line) in enumerate(lines) if start_visible_index <= visible_index <= end_visible_index]
+        if len(block) < 2:
+            continue
+        heading = _clean_heading(heading_line)
+        objects.append(
+            DocumentObject(
+                object_id=f"{doc_id}:section:{page}:{index + 1}",
+                doc_id=doc_id,
+                page=page,
+                object_type=ObjectType.SECTION,
+                content=_normalize(" ".join(block)),
+                metadata={
+                    "heading": heading,
+                    "block_lines": str(len(block)),
+                    **_line_metadata(start_visible_index, end_visible_index, len(lines)),
+                },
             )
         )
     return objects

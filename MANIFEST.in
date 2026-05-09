@@ -1,3 +1,4 @@
 include README.md
 include LICENSE
 recursive-include examples *.json *.pdf *.ipynb
+recursive-include examples *.md *.txt *.docx *.py

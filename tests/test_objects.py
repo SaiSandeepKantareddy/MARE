@@ -96,3 +96,37 @@ def test_extract_document_objects_extracts_line_aware_sections() -> None:
     assert sections
     assert sections[0].metadata["line_start"] == "1"
     assert sections[0].metadata["line_end"] == "3"
+
+
+def test_extract_document_objects_extracts_markdown_heading_sections() -> None:
+    text = """
+    # Setup
+    Connect the adapter to the laptop.
+    Restart the computer.
+
+    ## Verification
+    Confirm the charging light is on.
+    """
+    objects = extract_document_objects(text, doc_id="doc-1", page=1)
+    sections = [obj for obj in objects if obj.object_type == ObjectType.SECTION]
+
+    assert sections
+    assert sections[0].metadata["heading"] == "Setup"
+    assert sections[0].metadata["line_start"] == "1"
+    assert sections[0].metadata["line_end"] == "3"
+
+
+def test_extract_document_objects_extracts_markdown_list_steps_with_heading_and_lines() -> None:
+    text = """
+    # Setup
+    1. Connect the adapter.
+    2. Restart the computer.
+    - Confirm the charging light is on.
+    """
+    objects = extract_document_objects(text, doc_id="doc-1", page=1)
+    procedures = [obj for obj in objects if obj.object_type == ObjectType.PROCEDURE]
+
+    assert len(procedures) >= 3
+    assert procedures[0].metadata["heading"] == "Setup"
+    assert procedures[0].metadata["line_start"] == "2"
+    assert procedures[1].metadata["line_start"] == "3"

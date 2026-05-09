@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import datetime as dt
+import json
 import tempfile
 from pathlib import Path
+
+from mare.integrations import build_grounded_summary_payload, format_evidence_citation, hits_to_evidence_payload
 
 
 PARSER_OPTIONS = {
@@ -95,6 +99,78 @@ OUTPUT_OPTIONS = {
         "extra": "mare-retrieval[llamaindex]",
     },
 }
+
+
+def _ui_session_history_path() -> Path:
+    return Path("generated/ui_sessions/playground-history.json")
+
+
+def _load_ui_session_history(path: Path | None = None) -> dict:
+    history_path = path or _ui_session_history_path()
+    if not history_path.exists():
+        timestamp = dt.datetime.now().isoformat(timespec="seconds")
+        return {"created_at": timestamp, "updated_at": timestamp, "entries": []}
+    try:
+        payload = json.loads(history_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        timestamp = dt.datetime.now().isoformat(timespec="seconds")
+        return {"created_at": timestamp, "updated_at": timestamp, "entries": []}
+    if not isinstance(payload, dict):
+        timestamp = dt.datetime.now().isoformat(timespec="seconds")
+        return {"created_at": timestamp, "updated_at": timestamp, "entries": []}
+    payload.setdefault("created_at", dt.datetime.now().isoformat(timespec="seconds"))
+    payload.setdefault("entries", [])
+    if not isinstance(payload["entries"], list):
+        payload["entries"] = []
+    payload["updated_at"] = dt.datetime.now().isoformat(timespec="seconds")
+    return payload
+
+
+def _save_ui_session_history(history: dict, path: Path | None = None) -> None:
+    history_path = path or _ui_session_history_path()
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history["updated_at"] = dt.datetime.now().isoformat(timespec="seconds")
+    history_path.write_text(json.dumps(history, indent=2) + "\n")
+
+
+def _build_ui_history_entry(*, filenames: list[str], query: str, explanation, stack: dict) -> dict:
+    best = explanation.fused_results[0] if explanation.fused_results else None
+    return {
+        "timestamp": dt.datetime.now().isoformat(timespec="seconds"),
+        "query": query,
+        "filenames": filenames,
+        "source_count": len(filenames),
+        "citation": (
+            format_evidence_citation(title=best.title, page=best.page, metadata=best.metadata)
+            if best
+            else ""
+        ),
+        "source_document": _source_label(best) if best else "",
+        "object_type": (best.object_type or "page") if best else "",
+        "snippet": (best.snippet or "") if best else "",
+        "intent": explanation.plan.intent,
+        "stack": {
+            "parser": stack["parser"],
+            "retriever": stack["retriever"],
+            "reranker": stack["reranker"],
+            "output_mode": stack["output_mode"],
+        },
+    }
+
+
+def _append_ui_session_history(*, filenames: list[str], query: str, explanation, stack: dict, path: Path | None = None) -> dict:
+    history = _load_ui_session_history(path)
+    history["entries"].append(_build_ui_history_entry(filenames=filenames, query=query, explanation=explanation, stack=stack))
+    history["entries"] = history["entries"][-20:]
+    _save_ui_session_history(history, path)
+    return history
+
+
+def _clear_ui_session_history(path: Path | None = None) -> dict:
+    history = _load_ui_session_history(path)
+    history["entries"] = []
+    _save_ui_session_history(history, path)
+    return history
 
 
 def _require_streamlit():
@@ -199,7 +275,7 @@ def _render_candidate(st, hit, rank: int) -> None:
         <div class="mare-card">
           <div class="mare-label">Candidate {rank}</div>
           <div class="mare-value">Page {hit.page}</div>
-          <p class="mare-mini"><strong>Source PDF:</strong> {_source_label(hit)}</p>
+          <p class="mare-mini"><strong>Source document:</strong> {_source_label(hit)}</p>
           <p class="mare-mini"><strong>Object type:</strong> {hit.object_type or 'page'}</p>
           <p class="mare-mini"><strong>Score:</strong> {hit.score}</p>
           <p class="mare-mini"><strong>Reason:</strong> {hit.reason}</p>
@@ -312,8 +388,72 @@ def _render_stack_summary(st, stack: dict) -> None:
     )
 
 
+def _render_recent_runs(st, history: dict) -> None:
+    entries = history.get("entries", [])
+    st.markdown("**Recent runs**")
+    if not entries:
+        st.caption("No saved UI runs yet.")
+        return
+    for entry in reversed(entries[-5:]):
+        source_label = ", ".join(entry.get("filenames", [])[:2])
+        if entry.get("source_count", 0) > 2:
+            source_label += " …"
+        st.markdown(
+            f"""
+            <div class="mare-card" style="margin-bottom:0.75rem;">
+              <div class="mare-label">{entry.get('timestamp', '')}</div>
+              <div class="mare-value">{entry.get('query', '')}</div>
+              <p class="mare-mini" style="margin-top:0.55rem;"><strong>Sources:</strong> {source_label or '[none]'}</p>
+              <p class="mare-mini"><strong>Citation:</strong> {entry.get('citation', '') or '[no citation available]'}</p>
+              <p class="mare-mini"><strong>Stack:</strong> {entry.get('stack', {}).get('parser', '')} / {entry.get('stack', {}).get('retriever', '')}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def _render_grounded_summary(st, summary: dict) -> None:
+    st.subheader("Grounded Summary")
+    overview = summary.get("overview") or "No grounded evidence found."
+    st.markdown(
+        f"""
+        <div class="mare-card" style="margin-bottom:0.9rem;">
+          <div class="mare-label">Overview</div>
+          <div class="mare-value">{overview}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    highlights = summary.get("highlights") or []
+    if not highlights:
+        st.caption("No grounded summary highlights are available for this run.")
+        return
+    for index, item in enumerate(highlights, start=1):
+        st.markdown(
+            f"""
+            <div class="mare-card" style="margin-bottom:0.75rem;">
+              <div class="mare-label">Highlight {index}</div>
+              <div class="mare-value">{item.get('citation') or '[no citation available]'}</div>
+              <p class="mare-mini" style="margin-top:0.55rem;"><strong>Snippet:</strong> {item.get('snippet') or '[no snippet available]'}</p>
+              <p class="mare-mini"><strong>Reason:</strong> {item.get('reason') or '[no reason available]'}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def _resolved_image_path(*candidates: str) -> Path | None:
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if path.is_file():
+            return path
+    return None
+
+
 def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdrant_url: str, qdrant_collection: str, qdrant_index_before_query: bool):
-    from mare.api import MAREApp, load_pdf
+    from mare.api import MAREApp, load_document
     from mare.extensions import (
         FAISSRetriever,
         FastEmbedReranker,
@@ -347,13 +487,14 @@ def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdran
 
     config = MAREConfig(retriever_factories=retriever_factories, reranker=reranker)
 
-    def _loader(pdf_paths: list[Path], reuse: bool):
-        apps = [load_pdf(pdf_path=pdf_path, reuse=reuse, parser=parser_key, config=config) for pdf_path in pdf_paths]
+    def _loader(source_paths: list[Path], reuse: bool):
+        apps = [load_document(source_path=source_path, reuse=reuse, parser=parser_key, config=config) for source_path in source_paths]
         if len(apps) == 1:
             return apps[0]
         corpus_paths = [app.corpus_path for app in apps if app.corpus_path is not None]
         multi_app = MAREApp.from_corpora(corpus_paths, config=config)
-        multi_app.source_pdfs = [pdf_path for pdf_path in pdf_paths]
+        multi_app.source_documents = [source_path for source_path in source_paths]
+        multi_app.source_pdfs = [source_path for source_path in source_paths]
         return multi_app
 
     def _maybe_index(app):
@@ -408,19 +549,19 @@ def _build_output_preview(app, query: str, top_k: int, output_mode: str):
     return None
 
 
-def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
+def _run_query(st, uploaded_files, query: str, top_k: int, stack_controls: dict):
     if not query.strip():
         st.warning("Enter a question first.")
         return
 
     temp_dir = Path(tempfile.gettempdir()) / "mare_streamlit"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    uploaded_pdfs = uploaded_pdf if isinstance(uploaded_pdf, list) else [uploaded_pdf]
-    pdf_paths: list[Path] = []
-    for item in uploaded_pdfs:
-        pdf_path = temp_dir / item.name
-        pdf_path.write_bytes(item.getvalue())
-        pdf_paths.append(pdf_path)
+    uploaded_sources = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
+    source_paths: list[Path] = []
+    for item in uploaded_sources:
+        source_path = temp_dir / item.name
+        source_path.write_bytes(item.getvalue())
+        source_paths.append(source_path)
 
     parser_key = stack_controls["parser"]["value"]
     retriever_key = stack_controls["retriever"]["value"]
@@ -437,8 +578,8 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
     )
 
     try:
-        with st.spinner("Ingesting PDF and retrieving best pages..."):
-            app = loader(pdf_paths=pdf_paths, reuse=stack_controls["reuse_corpus"])
+        with st.spinner("Ingesting documents and retrieving best evidence..."):
+            app = loader(source_paths=source_paths, reuse=stack_controls["reuse_corpus"])
             indexing_summary = maybe_index(app)
             corpus_path = app.corpus_path
             explanation = app.explain(query=query, top_k=top_k)
@@ -456,12 +597,12 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
             f"This run used the {next(label for label, meta in PARSER_OPTIONS.items() if meta['value'] == parser_key)} parser, "
             f"{next(label for label, meta in RETRIEVER_OPTIONS.items() if meta['value'] == retriever_key)} retrieval, "
             f"and {next(label for label, meta in RERANKER_OPTIONS.items() if meta['value'] == reranker_key)} reranking "
-            f"across {len(pdf_paths)} PDF{'s' if len(pdf_paths) != 1 else ''}."
+            f"across {len(source_paths)} document{'s' if len(source_paths) != 1 else ''}."
         ),
         "indexing": indexing_summary,
     }
     run_signature = _build_run_signature(
-        uploaded_filenames=[item.name for item in uploaded_pdfs],
+        uploaded_filenames=[item.name for item in uploaded_sources],
         query=query,
         top_k=top_k,
         stack_controls=stack_controls,
@@ -472,12 +613,22 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
         "corpus_path": str(corpus_path) if corpus_path else "",
         "corpus_paths": [str(path) for path in app.corpus_paths],
         "explanation": explanation,
-        "filenames": [item.name for item in uploaded_pdfs],
+        "grounded_summary": hits_to_evidence_payload(query=query, hits=explanation.fused_results).get(
+            "summary",
+            {"overview": "No grounded evidence found.", "highlight_count": 0, "highlights": []},
+        ),
+        "filenames": [item.name for item in uploaded_sources],
         "app": app,
         "stack": stack_summary,
         "output_preview": output_preview,
         "run_signature": run_signature,
     }
+    st.session_state["mare_ui_history"] = _append_ui_session_history(
+        filenames=[item.name for item in uploaded_sources],
+        query=query,
+        explanation=explanation,
+        stack=stack_summary,
+    )
 
 
 def main() -> None:
@@ -492,13 +643,15 @@ def main() -> None:
         st.session_state["mare_query_input"] = ""
     if "mare_submit_via_enter" not in st.session_state:
         st.session_state["mare_submit_via_enter"] = False
+    if "mare_ui_history" not in st.session_state:
+        st.session_state["mare_ui_history"] = _load_ui_session_history()
 
     st.markdown(
         """
         <div class="mare-hero">
           <h1 style="margin:0 0 0.35rem 0;">MARE Playground</h1>
           <p style="margin:0; font-size:1.05rem; color:#334155;">
-            Explore MARE as a PDF evidence layer for developers and agents: ask a question, inspect the exact page and snippet, and see the visual proof and structured output behind the result.
+            Explore MARE as a grounded document evidence layer for developers and agents: ask a question, inspect the exact evidence, and see the structured output behind the result.
           </p>
         </div>
         """,
@@ -515,9 +668,9 @@ def main() -> None:
         )
 
         st.markdown("**How To Test**")
-        st.write("1. Upload a PDF")
+        st.write("1. Upload one or more documents")
         st.write("2. Ask a concrete instruction question")
-        st.write("3. Inspect the highlighted evidence, stack used, and agent-facing output shape")
+        st.write("3. Inspect the citation, any available visual proof, and the agent-facing output shape")
         st.caption("Recommended starting point: `Basic` mode, which uses the built-in parser and built-in lexical evidence retrieval.")
         st.markdown("**Good test prompts**")
         st.code("partially reinstall the set screws if they fall out", language="text")
@@ -535,7 +688,7 @@ def main() -> None:
             retriever_meta = _selected_option_payload(RETRIEVER_OPTIONS, retriever_label)
             st.caption(f"{retriever_meta['description']} Install: `{retriever_meta['extra']}`")
             if retriever_meta["value"] == "hybrid-semantic":
-                st.info("Recommended advanced option for most real PDFs. It preserves MARE's evidence-first lexical behavior and adds semantic retrieval on top.")
+                st.info("Recommended advanced option for most real documents. It preserves MARE's evidence-first lexical behavior and adds semantic retrieval on top.")
 
             reranker_label = st.selectbox("Reranker", _option_labels(RERANKER_OPTIONS), index=0)
             reranker_meta = _selected_option_payload(RERANKER_OPTIONS, reranker_label)
@@ -553,7 +706,7 @@ def main() -> None:
             if retriever_meta["value"] == "qdrant":
                 qdrant_url = st.text_input("Qdrant URL", value="http://localhost:6333")
                 qdrant_collection = st.text_input("Qdrant collection", value="mare-docs")
-                qdrant_index_before_query = st.checkbox("Index current PDF into Qdrant before retrieval", value=False)
+                qdrant_index_before_query = st.checkbox("Index current documents into Qdrant before retrieval", value=False)
         else:
             parser_label = "Builtin PDF"
             retriever_label = "Built-in lexical (Recommended)"
@@ -577,13 +730,18 @@ def main() -> None:
         }
 
         st.markdown("---")
-        st.caption("The Streamlit app is the visual playground. The Python package is the deeper PDF evidence layer that developers and agents can call directly.")
+        st.caption("The Streamlit app is the visual playground. The Python package is the deeper document evidence layer that developers and agents can call directly.")
         if mode == "Basic":
-            st.success("Using the recommended default stack: Builtin PDF + built-in lexical evidence retrieval.")
+            st.success("Using the recommended default stack: built-in parser + built-in lexical evidence retrieval.")
+        st.markdown("---")
+        _render_recent_runs(st, st.session_state["mare_ui_history"])
+        if st.button("Clear recent runs"):
+            st.session_state["mare_ui_history"] = _clear_ui_session_history()
+            st.success("Cleared saved UI run history.")
 
-    uploaded_pdf = st.file_uploader("Upload one or more PDFs", type=["pdf"], accept_multiple_files=True)
+    uploaded_pdf = st.file_uploader("Upload one or more documents", type=["pdf", "md", "markdown", "txt", "docx"], accept_multiple_files=True)
     query = st.text_input(
-        "Ask a question about the document",
+        "Ask a question about the documents",
         key="mare_query_input",
         placeholder="Try: partially reinstall the set screws if they fall out",
         on_change=lambda: st.session_state.__setitem__("mare_submit_via_enter", True),
@@ -593,7 +751,8 @@ def main() -> None:
     submitted = st.button("Ask MARE")
 
     if not uploaded_pdf:
-        st.info("Upload one or more PDFs to start. The demo will render pages, retrieve evidence, and show which document won.")
+        st.info("Upload one or more documents to start. PDFs, Word docs, Markdown, and text files work best right now.")
+        st.caption("PDFs currently have the strongest visual proof flow. Markdown, text, and DOCX rely more on snippet + citation proof.")
         return
 
     if submitted or st.session_state.get("mare_submit_via_enter"):
@@ -631,10 +790,10 @@ def main() -> None:
         st.markdown(
             f"""
             <div class="mare-card">
-              <div class="mare-label">Uploaded file</div>
+              <div class="mare-label">Uploaded documents</div>
               <div class="mare-value">{", ".join(item.name for item in uploaded_pdf[:3])}{' …' if len(uploaded_pdf) > 3 else ''}</div>
               <p class="mare-mini" style="margin-top:0.8rem;">
-                Ask a question to see the best matching page, the exact snippet, the highlighted evidence image, and the structured stack/output MARE would expose to code or agents.
+                Ask a question to see the best matching evidence, the exact snippet, any available visual proof, and the structured stack/output MARE would expose to code or agents.
               </p>
             </div>
             """,
@@ -644,7 +803,7 @@ def main() -> None:
 
     explanation = result["explanation"]
     if not explanation.fused_results:
-        st.error("No matching page found.")
+        st.error("No matching evidence found.")
         return
 
     best = explanation.fused_results[0]
@@ -656,7 +815,7 @@ def main() -> None:
           <div class="mare-label">Current question</div>
           <div class="mare-value">{result["query"]}</div>
           <p class="mare-mini" style="margin-top:0.6rem;">
-            PDFs: {", ".join(result["filenames"][:3])}{' …' if len(result["filenames"]) > 3 else ''} <br/>
+            Documents: {", ".join(result["filenames"][:3])}{' …' if len(result["filenames"]) > 3 else ''} <br/>
             Corpora: {len(result.get("corpus_paths") or ([result["corpus_path"]] if result["corpus_path"] else []))}
           </p>
         </div>
@@ -666,11 +825,11 @@ def main() -> None:
 
     metric_cols = st.columns(4)
     with metric_cols[0]:
-        _render_metric_card(st, "Best Page", str(best.page))
+        _render_metric_card(st, "Best page/region", str(best.page))
     with metric_cols[1]:
         _render_metric_card(st, "Intent", explanation.plan.intent.replace("_", " "))
     with metric_cols[2]:
-        _render_metric_card(st, "Source PDF", _source_label(best))
+        _render_metric_card(st, "Source document", _source_label(best))
     with metric_cols[3]:
         _render_metric_card(st, "Object", best.object_type or "page")
 
@@ -678,8 +837,9 @@ def main() -> None:
 
     with left:
         st.subheader("Answer Evidence")
-        st.markdown(f"**Source PDF:** {_source_label(best)}")
-        st.markdown(f"**Best page:** {best.page}")
+        st.markdown(f"**Source document:** {_source_label(best)}")
+        st.markdown(f"**Citation:** {format_evidence_citation(title=best.title, page=best.page, metadata=best.metadata)}")
+        st.markdown(f"**Best page/region:** {best.page}")
         st.markdown(f"**Score:** {best.score}")
         st.markdown(f"**Object type:** {best.object_type or 'page'}")
         st.markdown(f"**Why it matched:** {best.reason}")
@@ -701,13 +861,13 @@ def main() -> None:
         )
 
     with right:
-        st.subheader("Highlighted Page")
-        image_path = Path(best.highlight_image_path or best.page_image_path)
-        if image_path.exists():
+        st.subheader("Visual Proof")
+        image_path = _resolved_image_path(best.highlight_image_path, best.page_image_path)
+        if image_path is not None:
             caption = f"Highlighted page {best.page}" if best.highlight_image_path else f"Page {best.page}"
             st.image(str(image_path), caption=caption, width="stretch")
         else:
-            st.warning("No page image available.")
+            st.info("No page image is available for this result. Use the citation and snippet as the primary proof.")
 
     preview_left, preview_right = st.columns([0.7, 1.3])
     with preview_left:
@@ -716,10 +876,13 @@ def main() -> None:
         _render_stack_summary(st, result["stack"])
 
     st.markdown("")
+    _render_grounded_summary(st, result.get("grounded_summary") or {"overview": "No grounded evidence found.", "highlight_count": 0, "highlights": []})
+
+    st.markdown("")
     _render_page_objects(st, app.get_page_objects(best.doc_id, limit=6) if app else [])
 
     if len(explanation.fused_results) > 1:
-        st.subheader("Other Candidate Pages")
+        st.subheader("Other Evidence")
         candidate_cols = st.columns(min(3, len(explanation.fused_results) - 1))
         for idx, hit in enumerate(explanation.fused_results[1:], start=2):
             col = candidate_cols[(idx - 2) % len(candidate_cols)]

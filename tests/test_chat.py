@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mare.chat import _build_app_from_args, _discover_folder_inputs, run_chat
+import json
+
+from mare.chat import _build_app_from_args, _discover_folder_inputs, build_session_store, run_chat
 from mare.types import Modality, QueryPlan, RetrievalExplanation, RetrievalHit
 
 
@@ -10,6 +12,8 @@ class _FakeApp:
     def __init__(self) -> None:
         self.corpus_path = Path("generated/manual.json")
         self.corpus_paths = [self.corpus_path]
+        self.source_document = Path("manual.md")
+        self.source_documents = [self.source_document]
         self.source_pdf = Path("manual.pdf")
         self.source_pdfs = [self.source_pdf]
         self.documents = [object()]
@@ -18,7 +22,24 @@ class _FakeApp:
         return {"page_count": 1, "object_counts": {"procedure": 1}}
 
     def search_objects(self, query: str, object_type: str | None = None, limit: int = 5):
-        return [{"page": 10, "object_type": object_type or "procedure", "content": "Connect the AC adapter."}]
+        if query == "no matches":
+            return []
+        return [
+            {
+                "page": 10,
+                "title": "Manual",
+                "object_type": object_type or "procedure",
+                "content": "1 Connect the AC adapter to the laptop.",
+                "metadata": {"step": "1", "heading": "Connecting the AC adapter"},
+            },
+            {
+                "page": 10,
+                "title": "Manual",
+                "object_type": object_type or "procedure",
+                "content": "2 Plug the adapter into a power outlet.",
+                "metadata": {"step": "2", "heading": "Connecting the AC adapter"},
+            },
+        ][:limit]
 
     def explain(self, query: str, top_k: int = 3):
         return RetrievalExplanation(
@@ -45,19 +66,74 @@ class _FakeApp:
                     object_id="doc-1:procedure:1",
                     object_type="procedure",
                     metadata={"source": "manual.pdf"},
-                )
+                ),
+                RetrievalHit(
+                    doc_id="doc-2",
+                    title="Manual",
+                    page=11,
+                    modality=Modality.TEXT,
+                    score=0.72,
+                    reason="Matched setup instruction wording.",
+                    snippet="Plug the adapter into the wall outlet before use.",
+                    page_image_path="generated/manual/page-11.png",
+                    highlight_image_path="generated/manual/highlight-11.png",
+                    object_id="doc-2:procedure:1",
+                    object_type="procedure",
+                    metadata={"source": "manual.pdf"},
+                ),
             ],
         )
 
 
 def test_discover_folder_inputs(tmp_path: Path) -> None:
     (tmp_path / "manual.pdf").write_text("pdf")
+    (tmp_path / "guide.md").write_text("# guide")
+    (tmp_path / "notes.docx").write_text("placeholder")
     (tmp_path / "manual.json").write_text("{}")
 
     pdfs, corpora = _discover_folder_inputs(tmp_path)
 
-    assert pdfs == [str(tmp_path / "manual.pdf")]
-    assert corpora == [str(tmp_path / "manual.json")]
+    assert pdfs == [str(tmp_path / "guide.md"), str(tmp_path / "manual.pdf"), str(tmp_path / "notes.docx")]
+    assert corpora == []
+
+
+def test_discover_folder_inputs_supports_include_patterns(tmp_path: Path) -> None:
+    (tmp_path / "guide.md").write_text("# guide")
+    (tmp_path / "manual.pdf").write_text("pdf")
+    (tmp_path / "notes.docx").write_text("placeholder")
+
+    pdfs, corpora = _discover_folder_inputs(tmp_path, include=["*.md", "*.docx"])
+
+    assert pdfs == [str(tmp_path / "guide.md"), str(tmp_path / "notes.docx")]
+    assert corpora == []
+
+
+def test_discover_folder_inputs_supports_exclude_patterns(tmp_path: Path) -> None:
+    (tmp_path / "guide.md").write_text("# guide")
+    (tmp_path / "manual.pdf").write_text("pdf")
+    nested = tmp_path / "archive"
+    nested.mkdir()
+    (nested / "old-notes.txt").write_text("ignore me")
+
+    pdfs, corpora = _discover_folder_inputs(tmp_path, exclude=["archive/*", "*.pdf"])
+
+    assert pdfs == [str(tmp_path / "guide.md")]
+    assert corpora == []
+
+
+def test_discover_folder_inputs_recurses_and_filters_for_real_corpora(tmp_path: Path) -> None:
+    nested = tmp_path / "docs" / "nested"
+    nested.mkdir(parents=True)
+    (nested / "manual.PDF").write_text("pdf")
+    (nested / "notes.json").write_text('{"foo": "bar"}')
+    (nested / "manual.json").write_text(
+        '{"source_pdf": "manual.pdf", "documents": [{"doc_id": "doc-1", "page": 1, "text": "hello"}]}'
+    )
+
+    pdfs, corpora = _discover_folder_inputs(tmp_path)
+
+    assert pdfs == [str(nested / "manual.PDF")]
+    assert corpora == [str(nested / "manual.json")]
 
 
 def test_build_app_from_folder_uses_discovered_inputs(monkeypatch, tmp_path: Path) -> None:
@@ -65,7 +141,15 @@ def test_build_app_from_folder_uses_discovered_inputs(monkeypatch, tmp_path: Pat
     fake_app = _FakeApp()
     monkeypatch.setattr("mare.chat._load_app", lambda **kwargs: fake_app)
 
-    app = _build_app_from_args(folder=str(tmp_path), pdfs=[], corpora=[], reuse=True, parser="builtin")
+    app = _build_app_from_args(
+        folder=str(tmp_path),
+        documents=[],
+        corpora=[],
+        include=[],
+        exclude=[],
+        reuse=True,
+        parser="builtin",
+    )
 
     assert app is fake_app
 
@@ -78,8 +162,14 @@ def test_run_chat_answers_question_and_exits(monkeypatch, capsys) -> None:
     output = capsys.readouterr().out
 
     assert "MARE Chat" in output
+    assert "Loaded documents: manual.md" in output
+    assert "Intent: semantic_lookup" in output
+    assert "Confidence: 0.800" in output
     assert "Best page: 10" in output
+    assert "Citation: manual.pdf | page 10" in output
+    assert "Score: 0.950" in output
     assert "Highlight:" in output
+    assert "Other evidence" in output
 
 
 def test_run_chat_supports_json_and_sources(monkeypatch, capsys) -> None:
@@ -90,4 +180,142 @@ def test_run_chat_supports_json_and_sources(monkeypatch, capsys) -> None:
     output = capsys.readouterr().out
 
     assert "Sources" in output
+    assert "Documents: manual.md" in output
     assert "\"workflow\": \"agent-evidence\"" in output
+
+
+def test_run_chat_supports_steps_command(monkeypatch, capsys) -> None:
+    answers = iter([":steps connect the adapter", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Step query: connect the adapter" in output
+    assert "Steps" in output
+    assert "1. 1 Connect the AC adapter to the laptop." in output
+    assert "Citation: page 10 | Manual | Connecting the AC adapter | step 1" in output
+
+
+def test_run_chat_steps_command_handles_no_matches(monkeypatch, capsys) -> None:
+    answers = iter([":steps no matches", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Steps: No matching procedure evidence found." in output
+
+
+def test_run_chat_supports_compare_command(monkeypatch, capsys) -> None:
+    answers = iter([":compare connect the adapter", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Compare query: connect the adapter" in output
+    assert "Comparison" in output
+    assert "1. manual.pdf | page 10 | procedure | score=0.950" in output
+    assert "2. manual.pdf | page 11 | procedure | score=0.720" in output
+    assert "Reason: Matched setup instruction wording." in output
+
+
+def test_run_chat_compare_command_handles_no_matches(monkeypatch, capsys) -> None:
+    class _NoMatchApp(_FakeApp):
+        def explain(self, query: str, top_k: int = 3):
+            return RetrievalExplanation(
+                plan=QueryPlan(
+                    query=query,
+                    selected_modalities=[Modality.TEXT],
+                    discarded_modalities=[Modality.IMAGE, Modality.LAYOUT],
+                    confidence=0.2,
+                    intent="semantic_lookup",
+                    rationale="test",
+                ),
+                per_modality_results={},
+                fused_results=[],
+            )
+
+    answers = iter([":compare no matches", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_NoMatchApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Compare: No matching evidence found." in output
+
+
+def test_run_chat_supports_summary_command(monkeypatch, capsys) -> None:
+    answers = iter([":summary connect the adapter", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Summary query: connect the adapter" in output
+    assert "Grounded summary" in output
+    assert "Overview: Found 2 grounded results across 1 source." in output
+    assert "1. Connect the AC adapter to the laptop." in output
+    assert "Citation: manual.pdf | page 10" in output
+    assert "Reason: Matched text terms: adapter" in output
+
+
+def test_run_chat_summary_command_handles_no_matches(monkeypatch, capsys) -> None:
+    class _NoMatchApp(_FakeApp):
+        def explain(self, query: str, top_k: int = 3):
+            return RetrievalExplanation(
+                plan=QueryPlan(
+                    query=query,
+                    selected_modalities=[Modality.TEXT],
+                    discarded_modalities=[Modality.IMAGE, Modality.LAYOUT],
+                    confidence=0.2,
+                    intent="semantic_lookup",
+                    rationale="test",
+                ),
+                per_modality_results={},
+                fused_results=[],
+            )
+
+    answers = iter([":summary no matches", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_NoMatchApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Summary: No matching evidence found." in output
+
+
+def test_run_chat_saves_and_shows_session_history(monkeypatch, capsys, tmp_path: Path) -> None:
+    answers = iter(["how do I connect the AC adapter", ":history", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    session_file = tmp_path / "chat-session.json"
+    session_store = build_session_store(_FakeApp(), session_file=str(session_file), session_name="manual-session")
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5, session_store=session_store)
+    output = capsys.readouterr().out
+
+    payload = json.loads(session_file.read_text())
+    assert payload["session_name"] == "manual-session"
+    assert len(payload["entries"]) == 1
+    assert payload["entries"][0]["type"] == "ask"
+    assert payload["entries"][0]["query"] == "how do I connect the AC adapter"
+    assert payload["entries"][0]["top_result"]["citation"] == "manual.pdf | page 10"
+    assert "Session history: manual-session" in output
+    assert "Recent entries" in output
+    assert "[ask] how do I connect the AC adapter" in output
+
+
+def test_run_chat_can_clear_session_history(monkeypatch, capsys, tmp_path: Path) -> None:
+    answers = iter(["how do I connect the AC adapter", ":clear-history", ":history", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    session_file = tmp_path / "chat-session.json"
+    session_store = build_session_store(_FakeApp(), session_file=str(session_file), session_name="manual-session")
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5, session_store=session_store)
+    output = capsys.readouterr().out
+
+    payload = json.loads(session_file.read_text())
+    assert payload["entries"] == []
+    assert "Session history cleared." in output
+    assert "Entries: none" in output
