@@ -72,7 +72,7 @@ It will publish when:
 ## Recommended release flow
 
 1. Update version numbers.
-2. Write a release notes file such as `RELEASE_NOTES_0.4.0.md`.
+2. Write a release notes file such as `releases/RELEASE_NOTES_0.4.0.md`.
 3. Skim the README install and feature sections so the public story matches the release.
 4. Run the local release check.
 5. Commit and push.

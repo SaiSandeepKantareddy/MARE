@@ -71,11 +71,12 @@ Public repo content:
 - `README.md`
 - `DEVELOPER_GUIDE.md`
 - `PUBLISHING.md`
+- `releases/`
 - `examples/`
 - bundled sample content such as `examples/sample_pdfs/` and `examples/mixed_docs/`
 - `src/`
 - `tests/`
-- versioned `RELEASE_NOTES_*.md`
+- versioned release notes in `releases/`
 
 Local or internal-only workspace content:
 
